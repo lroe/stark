@@ -17,6 +17,7 @@ from functools import wraps
 load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "a-strong-default-secret-key-for-dev")
+print(f"--- VERCEL DEBUG: POSTGRES_URL is: {os.getenv('POSTGRES_URL')} ---")
 if os.getenv("POSTGRES_URL"):
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("POSTGRES_URL").replace("postgres://", "postgresql://")
 else:
