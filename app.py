@@ -9,8 +9,7 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, curren
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 import datetime
-import pandas as pd
-import numpy as np
+
 from flask_wtf.csrf import CSRFProtect
 from functools import wraps
 
@@ -207,33 +206,52 @@ def get_tutor_response(full_prompt):
         print(f"Error getting tutor response: {e}")
         return "I seem to be having a little trouble thinking. Could you try again?"
 
+# --- RAG (Retrieval-Augmented Generation) Helper Functions ---
 def _get_or_create_rag_retriever(lesson_id, lesson_script):
     if lesson_id in RAG_RETRIEVERS:
         return RAG_RETRIEVERS[lesson_id]
+    
     text_chunks = [chunk for chunk in lesson_script.split('\n\n') if chunk.strip()]
     if not text_chunks: return None
+
     try:
         embeddings = genai.embed_content(model='models/text-embedding-004', content=text_chunks, task_type="RETRIEVAL_DOCUMENT")['embedding']
-        df = pd.DataFrame(text_chunks, columns=['text'])
-        df['embeddings'] = embeddings
-        RAG_RETRIEVERS[lesson_id] = df
+        
+        # Use a simple list of dictionaries instead of a DataFrame
+        rag_data = []
+        for i, chunk in enumerate(text_chunks):
+            rag_data.append({'text': chunk, 'embedding': embeddings[i]})
+        
+        RAG_RETRIEVERS[lesson_id] = rag_data
         print(f"RAG retriever created and cached for lesson {lesson_id}.")
-        return df
+        return rag_data
     except Exception as e:
         print(f"Error creating RAG embeddings: {e}")
         return None
 
-def answer_question_with_rag(question, retriever_df):
-    if retriever_df is None:
+def answer_question_with_rag(question, rag_data):
+    if not rag_data:
         return "I'm sorry, I don't have enough information to answer that."
+
     try:
         query_embedding = genai.embed_content(model='models/text-embedding-004', content=question, task_type="RETRIEVAL_QUERY")['embedding']
     except Exception as e:
         print(f"Error embedding RAG query: {e}")
         return "I had trouble understanding your question. Please try rephrasing."
-    retriever_df["similarity"] = retriever_df.embeddings.apply(lambda x: np.dot(x, query_embedding))
-    top_chunks = retriever_df.sort_values(by="similarity", ascending=False).head(3)
-    context = "\n---\n".join(top_chunks['text'])
+
+    # Calculate similarity using standard Python and a helper for dot product
+    def dot_product(v1, v2):
+        return sum(x*y for x, y in zip(v1, v2))
+
+    for item in rag_data:
+        item['similarity'] = dot_product(item['embedding'], query_embedding)
+
+    # Sort the list of dictionaries and get the top results
+    sorted_data = sorted(rag_data, key=lambda x: x['similarity'], reverse=True)
+    top_chunks = [item['text'] for item in sorted_data[:3]]
+    
+    context = "\n---\n".join(top_chunks)
+    
     rag_prompt = f"""
 Based ONLY on the following context, provide a concise answer to the user's question. If the context doesn't contain the answer, say "That's a great question, but it's not covered in this chapter's material."
 
