@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Create Lesson{% endblock %}
+{% block content %}
+    <h1>Create an Adaptive Lesson</h1>
+    <p>Write your lesson below. Use the toolbar to add images, and use the tags below for questions.</p>
+    
+    <form id="lesson-form" action="{{ url_for('save_lesson') }}" method="post" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="title">Lesson Title</label>
+            <input type="text" id="title" name="title" required placeholder="e.g., Introduction to SEO">
+        </div>
+
+        <div class="editor-toolbar">
+            <button type="button" id="add-image-btn">Add Image</button>
+        </div>
+
+        <div id="lesson-editor" contenteditable="true" spellcheck="false">
+            <p>Start writing your lesson here...</p>
+        </div>
+        
+        <div class="form-group" style="margin-top: 20px;">
+            <label>Tag Cheatsheet</label>
+            <div class="instructions">...</div>
+        </div>
+
+        <input type="file" id="image-upload-input" name="media" style="display: none;" accept="image/*" multiple>
+        <input type="hidden" id="script-input" name="script">
+        
+        <button type="submit">Save Lesson</button>
+    </form>
+    <script src="{{ url_for('static', filename='js/create.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,17 @@
+
+<div class="content-block" data-id="{{ block.id }}">
+    <div class="drag-handle">☰</div>
+    <div class="block-content">
+        {% if block.block_type == 'text' %}
+            {% set content = block.content|fromjson %}
+            <textarea class="block-textarea" data-block-id="{{ block.id }}">{{ content.text }}</textarea>
+        {% else %}
+            <p><em>Unsupported block type: {{ block.block_type }}</em></p>
+        {% endif %}
+    </div>
+    <div class="block-actions">
+        <form action="{{ url_for('delete_block', block_id=block.id) }}" method="post" class="delete-block-form" style="display:inline;">
+            <button type="submit" class="delete-btn" title="Delete Block">×</button>
+        </form>
+    </div>
+</div>

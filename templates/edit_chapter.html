@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Edit Chapter{% endblock %}
+{% block content %}
+    <div class="page-header">
+        <a href="{{ url_for('manage_course', course_id=lesson.course_id) }}" class="back-link">← Back to {{ lesson.course.title }}</a>
+        <h1>Edit Chapter</h1>
+    </div>
+    
+    <form id="lesson-form" action="{{ url_for('update_chapter', lesson_id=lesson.id) }}" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+            <label for="title">Chapter Title</label>
+            <input type="text" id="title" name="title" required value="{{ lesson.title }}">
+        </div>
+
+        <div class="editor-toolbar">
+            <button type="button" id="add-image-btn" class="btn btn-secondary">Add Image</button>
+            <!-- NEW: Add Audio Button -->
+            <button type="button" id="add-audio-btn" class="btn btn-secondary">Add Audio</button>
+        </div>
+
+        <div id="lesson-editor" contenteditable="true" spellcheck="false" class="codex-editor">
+            {{ lesson.raw_script | safe }}
+        </div>
+        
+        <div class="form-group" style="margin-top: 20px;">
+            <label>Tag Cheatsheet</label>
+            <div class="instructions">
+                <b>Use these tags in the editor above:</b><br>
+                <code>[IMAGE: alt="A description of the image"]</code> (Use the "Add Image" button)<br>
+                <code>[AUDIO: description="A description of the sound"]</code> (Use the "Add Audio" button)<br>
+                <code>[QUESTION: Your question? OPTIONS: A) Opt 1, B) Opt 2... ANSWER: B]</code><br>
+                <code>[QUESTION_SA: Your question? KEYWORDS: concept1, concept2]</code>
+            </div>
+        </div>
+
+        <!-- NEW: Unified file input for all media types -->
+        <input type="file" id="media-upload-input" name="media_files" style="display: none;" multiple>
+        <input type="hidden" id="script-input" name="script">
+        <input type="hidden" id="editor-html-input" name="editor_html">
+        <button type="submit">Update Chapter</button>
+    </form>
+    
+    <script src="{{ url_for('static', filename='js/create.js') }}"></script>
+{% endblock %}

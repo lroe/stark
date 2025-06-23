@@ -1,0 +1,426 @@
+/* --- CourseWell Codex Theme --- */
+/* --- 1. Core & Fonts --- */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Spectral', serif;
+  background: #f9f5e3 url('https://www.transparenttextures.com/patterns/paper-fibers.png');
+  color: #3e2d1c;
+  line-height: 1.7;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, serif;
+  color: #402c1a;
+}
+
+a {
+  color: #8b5a2b;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* --- 2. Layout (Header, Nav, Main, Footer) --- */
+header.codex-header {
+  background: linear-gradient(135deg, #d1bfa4, #b89b6c);
+  padding: 2.5rem;
+  text-align: center;
+  border-bottom: 4px solid #5c4a2e;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+header.codex-header h1 {
+  font-family: 'UnifrakturCook', cursive;
+  font-size: 3.5rem;
+  margin: 0;
+  color: #2f1b0c;
+  text-shadow: 1px 1px 0px rgba(255, 255, 255, 0.2);
+}
+
+header.codex-header p {
+  font-size: 1.1rem;
+  margin-top: 0.5rem;
+  color: #4e3928;
+  font-style: italic;
+}
+
+nav.codex-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2rem;
+  padding: 1rem;
+  background-color: #f2e8cf;
+  border-bottom: 2px solid #b29a6e;
+}
+
+nav.codex-nav a {
+  text-decoration: none;
+  color: #5c3c1a;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  font-size: 1.1em;
+}
+
+nav.codex-nav a:hover {
+  color: #8b5a2b;
+  text-shadow: 0 1px 1px #fff8dc;
+  text-decoration: none;
+}
+
+main.codex-main {
+  max-width: 960px;
+  margin: 3rem auto;
+  padding: 2rem 3rem;
+  background: #fffaf0;
+  border: 1px solid #dbc9a2;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+footer.codex-footer {
+  text-align: center;
+  padding: 1.5rem;
+  margin-top: 4rem;
+  font-size: 0.95rem;
+  background: #d1bfa4;
+  color: #3e2d1c;
+  border-top: 4px solid #5c4a2e;
+}
+
+hr.section-divider {
+    border: 0;
+    height: 2px;
+    background-image: linear-gradient(to right, rgba(92, 74, 46, 0), rgba(92, 74, 46, 0.75), rgba(92, 74, 46, 0));
+    margin: 3rem 0;
+}
+
+/* --- 3. Components (Course Items, Forms, Buttons) --- */
+.course-list { list-style: none; padding: 0; }
+.course-item {
+  border: 2px solid #bfa073;
+  background: linear-gradient(#fcf8e3, #f6e7c1);
+  margin: 2rem 0;
+  padding: 1.5rem 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1), inset 0 0 10px #d3bb96;
+  transition: all 0.3s ease-in-out;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.course-item:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 15px rgba(0,0,0,0.15), inset 0 0 10px #d3bb96;
+}
+
+.course-info .course-title { font-size: 1.6rem; margin-top: 0; font-weight: 600;}
+.course-info .chapter-count, .course-info .course-meta { font-size: 1rem; color: #5a4732; margin-top: 5px; }
+
+.btn, button[type="submit"] {
+    font-family: 'Spectral', serif;
+    font-weight: 600;
+    background: linear-gradient(to bottom, #b89b6c, #a5875a);
+    color: #f9f5e3;
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.3);
+    padding: 10px 20px;
+    border: 1px solid #8c6d4a;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    text-decoration: none;
+    display: inline-block;
+    box-shadow: 0 2px 3px rgba(0,0,0,0.2);
+    transition: all 0.2s ease;
+}
+.btn:hover, button[type="submit"]:hover {
+    background: linear-gradient(to bottom, #c2a67a, #b39365);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    transform: translateY(-2px);
+    text-decoration: none;
+    color: white;
+}
+.btn-secondary { background: linear-gradient(to bottom, #c8c1b5, #b3a99a); color: #5c4a2e; text-shadow: none; }
+.btn-secondary:hover { background: linear-gradient(to bottom, #d3ccc1, #b9b0a1); }
+.btn-danger { background: linear-gradient(to bottom, #a96c6c, #8c4e4e); }
+.btn-danger:hover { background: linear-gradient(to bottom, #b57a7a, #9a5a5a); }
+
+.form-group { margin-bottom: 1.5rem; }
+label { display: block; margin-bottom: 8px; font-weight: 600; color: #5c4a2e; }
+input[type="text"], input[type="password"], textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #dbc9a2;
+    background-color: #fcf8e3;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-family: 'Spectral', serif;
+    font-size: 1rem;
+    color: #3e2d1c;
+}
+input:focus, textarea:focus { outline: 2px solid #bfa073; }
+
+/* Alert / Flash Message Styles */
+.alert { padding: 15px; margin-bottom: 20px; border: 1px solid transparent; border-radius: 4px; }
+.alert-success { color: #2f5d2f; background-color: #dff0d8; border-color: #d6e9c6; }
+.alert-danger { color: #a94442; background-color: #f2dede; border-color: #ebccd1; }
+.alert-info { color: #31708f; background-color: #d9edf7; border-color: #bce8f1; }
+.alert-warning { color: #8a6d3b; background-color: #fcf8e3; border-color: #faebcc; }
+
+/* --- 4. Course Player & Chat --- */
+.course-player-body { background: #e5e1d3; } /* A slightly different background for the player */
+.course-player-container { display: flex; width: 100%; height: 100vh; font-family: 'Spectral', serif;}
+
+.sidebar {
+    width: 320px;
+    background: #c1a884;
+    border-right: 3px solid #5c4a2e;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: inset -5px 0 15px rgba(0,0,0,0.2);
+    overflow-y: auto;
+}
+.sidebar h3 { color: #3e2d1c; border-bottom: 2px solid #6c5a3e; padding-bottom: 10px; }
+.chapter-nav-list { list-style: none; padding: 0; margin: 0; }
+.chapter-nav-item a {
+    display: flex; align-items: center;
+    padding: 12px 15px; text-decoration: none; color: #4e3928;
+    border-radius: 4px; margin-bottom: 5px;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+.chapter-nav-item a:hover { background-color: rgba(255, 255, 255, 0.2); }
+.chapter-nav-item.active a {
+    background-color: #f9f5e3;
+    color: #3e2d1c;
+    font-weight: bold;
+    box-shadow: inset 0 0 5px rgba(0,0,0,0.2);
+    border: 1px solid #a5875a;
+}
+.chapter-nav-item.completed a { color: #6c5a3e; text-decoration: line-through; }
+.chapter-nav-icon { color: #3e2d1c; font-weight: bold; margin-right: 8px; }
+
+.main-chat-area { flex-grow: 1; display: flex; flex-direction: column; height: 100vh; padding: 0 20px 20px 20px; background: #f9f5e3 url('https://www.transparenttextures.com/patterns/paper-fibers.png'); }
+.chat-header h2 { margin-bottom: 0; padding: 20px 0; border-bottom: 2px solid #d3bb96; }
+.chat-box { flex-grow: 1; overflow-y: auto; padding: 10px; }
+.message { margin-bottom: 15px; padding: 10px 18px; border-radius: 18px; max-width: 80%; line-height: 1.5; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+.tutor-message { background-color: #fffaf0; border: 1px solid #dbc9a2; align-self: flex-start; float: left; clear: both; }
+.student-message { background-color: #d1bfa4; color: #4e3928; align-self: flex-end; float: right; clear: both; }
+.options-container button { width: 100%; margin-top: 8px; text-align: left; }
+
+/* --- 5. Reviews and Ratings --- */
+.rating-stars { color: #c8811a; }
+.star-rating { display: flex; flex-direction: row-reverse; justify-content: flex-end; }
+.star-rating input[type="radio"] { display: none; }
+.star-rating label { font-size: 30px; color: #c8c1b5; cursor: pointer; }
+.star-rating input[type="radio"]:checked ~ label,
+.star-rating label:hover,
+.star-rating label:hover ~ label { color: #c8811a; }
+.review-item {
+    background-color: #fcf8e3;
+    border: 1px solid #d3bb96;
+    border-radius: 5px;
+    padding: 20px;
+    margin-bottom: 15px;
+}
+
+.review-comment-text {
+    /* This is the magic property! */
+    white-space: pre-wrap;
+}
+
+/* --- New Block Editor Styles --- */
+.content-block {
+    display: flex;
+    align-items: flex-start;
+    background: #fdf6e7;
+    border: 1px solid #d3bb96;
+    border-radius: 5px;
+    padding: 15px;
+    margin-bottom: 10px;
+}
+
+.drag-handle {
+    cursor: grab;
+    color: #a5875a;
+    font-size: 24px;
+    padding-right: 15px;
+    user-select: none;
+}
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.block-content {
+    flex-grow: 1;
+}
+
+/* Remove this entire block */
+.block-textarea {
+    /* ... */
+}
+
+/* --- New Rich-Text Editor Styles --- */
+.tox-tinymce {
+    border: none !important;
+    border-radius: 3px !important;
+    box-shadow: 0 0 15px rgba(0,0,0,0.05) !important;
+}
+
+.tox .tox-edit-area__iframe {
+    background-color: #fffaf0 !important;
+}
+
+.tox .tox-toolbar-overlord, .tox .tox-toolbar__primary {
+    background-color: #f2e8cf !important;
+    border-bottom: 2px solid #b29a6e !important;
+}
+
+.tox .tox-tbtn, .tox .tox-split-button__chevron {
+    color: #5c3c1a !important;
+}
+
+.tox .tox-tbtn:hover, .tox .tox-split-button:hover {
+    background-color: rgba(184, 155, 108, 0.2) !important;
+}
+
+.tox .tox-tbtn--enabled, .tox .tox-tbtn--active {
+    background-color: rgba(184, 155, 108, 0.4) !important;
+}
+
+/* Style for the main title input on the edit page */
+.chapter-title-editor {
+    font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, serif;
+    font-size: 2.5rem; /* Large and prominent */
+    font-weight: 600;
+    color: #402c1a;
+    border: none; /* No ugly border */
+    background: transparent; /* Blends into the page */
+    width: 100%;
+    padding: 10px 0;
+    border-bottom: 2px solid transparent; /* Hidden bottom border */
+    transition: border-color 0.3s ease;
+}
+
+.chapter-title-editor:focus {
+    outline: none; /* Remove default blue ring */
+    border-bottom: 2px solid #bfa073; /* Shows a subtle indicator on focus */
+}
+
+/* --- New Editor.js Styles --- */
+.codex-editor {
+    /* This class is added by Editor.js, we can target it */
+    padding: 1rem;
+    border: 1px solid #d3bb96;
+    border-radius: 5px;
+    background: #fdf6e7;
+}
+
+/* Style the placeholder text */
+.ce-paragraph[data-placeholder]:empty::before{
+    color: #a5875a;
+    font-style: italic;
+}
+
+/* Style for headings */
+.ce-header {
+    font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, serif;
+    color: #402c1a;
+    padding: 0;
+    margin: 1.5em 0 0.5em;
+}
+
+/* Style for list items */
+.ce-list__item {
+    line-height: 1.8;
+}
+
+/* Inline toolbar styles */
+.ce-inline-toolbar {
+    background: #5c4a2e !important;
+    border-radius: 5px !important;
+    color: #f9f5e3 !important;
+}
+
+.ce-inline-tool, .ce-inline-toolbar__dropdown {
+    color: #f9f5e3 !important;
+}
+.ce-inline-tool:hover, .ce-inline-toolbar__dropdown:hover {
+    background-color: #6c5a3e !important;
+}
+
+/* Settings/Tune menu styles */
+.ce-settings {
+    background: #5c4a2e !important;
+    color: #f9f5e3 !important;
+}
+.ce-settings__button:hover {
+    background: #6c5a3e !important;
+}
+
+/* --- New Chat Input Styles --- */
+.chat-input-container {
+    display: flex;
+    gap: 10px;
+    padding: 15px 10px;
+    border-top: 2px solid #d3bb96;
+    background-color: #f2e8cf; /* A slightly different color to stand out */
+}
+
+.chat-input-container input[type="text"] {
+    flex-grow: 1; /* Make the input take up most of the space */
+    border: 1px solid #bfa073;
+    padding: 10px 15px;
+    border-radius: 20px; /* Rounded corners */
+    background-color: #fffaf0;
+}
+.chat-input-container input[type="text"]:focus {
+    outline: none;
+    border-color: #8b5a2b;
+    box-shadow: 0 0 5px rgba(139, 90, 43, 0.3);
+}
+
+.chat-input-container button {
+    flex-shrink: 0; /* Prevent the button from shrinking */
+    padding: 10px 15px;
+    border-radius: 20px;
+}
+
+/* ... (all your existing CSS) ... */
+
+/* --- New Editor Preview for Audio --- */
+.audio-preview {
+    background-color: #f7f7f7;
+    border: 1px solid #d1bfa4;
+    border-radius: 5px;
+    padding: 15px;
+    margin: 1rem 0;
+    font-style: italic;
+    color: #5c4a2e;
+}
+.audio-preview audio {
+    width: 100%;
+    margin-top: 10px;
+}
+
+/* --- 2. Layout (Header, Nav, Main, Footer) --- */
+
+/* NEW styles for the logo and header title */
+.logo-title-container {
+    display: flex;
+    justify-content: center; /* Center the items horizontally */
+    align-items: center;    /* Align the items vertically */
+    gap: 1rem;              /* Add some space between the logo and the title */
+}
+
+.header-logo {
+    height: 70px; /* Adjust this value to make your logo bigger or smaller */
+    width: auto;   /* Maintains the aspect ratio */
+}
+/* END of new styles */
+
+

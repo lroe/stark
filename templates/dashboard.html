@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}My Shelf{% endblock %}
+{% block content %}
+    
+    <h2>My Learning</h2>
+    {% if enrollments %}
+        <ul class="course-list">
+            {% for enrollment in enrollments %}
+                <li class="course-item">
+                    <div class="course-info">
+                        <h3 class="course-title">{{ enrollment.course.title }}</h3>
+                        <p class="chapter-count">
+                            By {{ enrollment.course.creator.username }} | 
+                            Progress: {{ enrollment.last_completed_chapter_number }} of {{ enrollment.course.lessons|length }} Chapters
+                        </p>
+                    </div>
+                    <div class="course-actions">
+                        <a href="{{ url_for('course_player', course_id=enrollment.course.id) }}" class="btn">Resume</a>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>Your learning shelf is empty. <a href="{{ url_for('explore') }}">Visit the Library</a> to enroll in a course.</p>
+    {% endif %}
+
+   
+
+    
+
+{% endblock %}

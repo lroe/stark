@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Adaptive Lesson</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="chat-container">
+        <div id="chat-box" class="chat-box">
+            <!-- Messages will appear here -->
+        </div>
+
+        <!-- NEW: A permanent home for the Q&A button -->
+        <div class="qna-button-container">
+            <button id="ask-qna-btn">Ask a Question</button>
+        </div>
+
+        <div id="input-area" class="input-area">
+            <p id="system-message" class="system-message">Guidee is thinking...</p>
+        </div>
+    </div>
+
+    <script>
+        const LESSON_ID = "{{ lesson_id }}";
+    </script>
+    <script src="{{ url_for('static', filename='js/lesson.js') }}"></script>
+</body>
+</html>

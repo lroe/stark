@@ -1,0 +1,43 @@
+
+{% extends "base.html" %}
+{% block title %}Edit Lesson{% endblock %}
+{% block content %}
+    <h1>Edit Lesson</h1>
+    <p>Modify your lesson below. You can add new images or update the text and questions.</p>
+    
+    <!-- The form points to the new update_lesson route -->
+    <form id="lesson-form" action="{{ url_for('update_lesson', lesson_id=lesson.id) }}" method="post" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="title">Lesson Title</label>
+            <!-- Pre-fill the title with the existing lesson's title -->
+            <input type="text" id="title" name="title" required value="{{ lesson.title }}">
+        </div>
+
+        <div class="editor-toolbar">
+            <button type="button" id="add-image-btn">Add Image</button>
+        </div>
+
+        <!-- Pre-fill the editor with the existing lesson's raw script -->
+        <div id="lesson-editor" contenteditable="true" spellcheck="false">
+            {{ lesson.raw_script | safe }}
+        </div>
+        
+        <div class="form-group" style="margin-top: 20px;">
+            <label>Tag Cheatsheet</label>
+            <div class="instructions">
+                <b>Use these tags in the editor above:</b><br>
+                <code>[IMAGE: alt="A description of the image"]</code><br>
+                <code>[QUESTION: Your question? OPTIONS: A) Opt 1, B) Opt 2... ANSWER: B]</code><br>
+                <code>[QUESTION_SA: Your question? KEYWORDS: concept1, concept2]</code>
+            </div>
+        </div>
+
+        <input type="file" id="image-upload-input" name="media" style="display: none;" accept="image/*" multiple>
+        <input type="hidden" id="script-input" name="script">
+        
+        <button type="submit">Update Lesson</button>
+    </form>
+    
+    <!-- We can reuse the same JavaScript from the create page! -->
+    <script src="{{ url_for('static', filename='js/create.js') }}"></script>
+{% endblock %}

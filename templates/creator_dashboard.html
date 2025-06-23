@@ -1,0 +1,48 @@
+
+{% extends "base.html" %}
+{% block title %}Scribe's Desk{% endblock %}
+{% block content %}
+
+    <h2>Scribe's Desk</h2>
+    <div class="create-course-form">
+        <h3>Scribe a New Course</h3>
+        <form action="{{ url_for('create_course') }}" method="post" class="inline-form">
+            <div class="form-group">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="text" id="title" name="title" required placeholder="Title your new codex...">
+            </div>
+            <button type="submit" class="btn">Begin</button>
+        </form>
+    </div>
+
+    <hr class="section-divider">
+
+    <h3>Your Works</h3>
+    {% if created_courses %}
+        <ul class="course-list">
+            {% for course in created_courses %}
+                <li class="course-item">
+                    <div class="course-info">
+                        <h3 class="course-title">{{ course.title }}</h3>
+                        <p class="chapter-count">
+                            ({{ course.lessons|length }} Chapters) -
+                            {% if course.is_published %}
+                                <span style="color: #2f5d2f; font-weight: bold;">Published</span>
+                            {% else %}
+                                <span style="color: #6c5a3e;">Draft</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div class="course-actions">
+                        <a href="{{ url_for('manage_course', course_id=course.id) }}" class="btn btn-secondary">Manage</a>
+                        <a href="{{ url_for('course_player', course_id=course.id) }}" class="btn btn-secondary" target="_blank">Preview</a>
+
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>You have not scribed any courses yet. Use the form above to begin your work.</p>
+    {% endif %}
+
+{% endblock %}

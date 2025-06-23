@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ course.title }}{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('explore') }}" class="back-link">← Back to Explore</a>
+<div class="course-detail-header" style="display: flex; gap: 30px; margin-top: 2rem;">
+    <img src="{{ course.thumbnail_url or url_for('static', filename='uploads/default_thumbnail.png') }}" alt="{{ course.title }} Thumbnail" style="width: 250px; height: 250px; object-fit: cover; border-radius: 8px;">
+    <div>
+        <h1>{{ course.title }}</h1>
+        <p><em>By {{ course.creator.username }}</em></p>
+        <p>{{ course.description }}</p>
+        <div class="course-actions" style="margin-top: 20px;">
+            {# Place the enrollment/resume button here #}
+            {% if current_user.is_authenticated %}
+                {% if course.creator.id == current_user.id %}
+                    <a href="{{ url_for('manage_course', course_id=course.id) }}" class="btn btn-secondary">Manage Your Course</a>
+                {% elif current_user.is_enrolled(course) %}
+                     <a href="{{ url_for('course_player', course_id=course.id) }}" class="btn btn-primary">Resume Learning</a>
+                {% else %}
+                    <form action="{{ url_for('enroll_in_course', course_id=course.id) }}" method="post" style="display: inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                         <!-- FIX: Always include the share_id input. The 'or ''' handles cases where it's None. -->
+                        <input type="hidden" name="share_id" value="{{ course.shareable_link_id or '' }}">
+                        <button type="submit" class="btn btn-primary">Enroll Now</button>
+                    </form>
+                {% endif %}
+            {% else %}
+                <a href="{{ url_for('login', next=request.path) }}" class="btn btn-primary">Login to Enroll</a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<hr class="section-divider">
+
+<h2>Course Content</h2>
+<ul class="chapter-list">
+    {% for chapter in course.lessons %}
+        <li class="chapter-item">
+            <span class="chapter-number">Chapter {{ chapter.chapter_number }}</span>
+            <span class="chapter-title">{{ chapter.title }}</span>
+        </li>
+    {% else %}
+        <li><p>The creator hasn't added any chapters yet.</p></li>
+    {% endfor %}
+</ul>
+{% endblock %}

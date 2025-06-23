@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Interactive Courses{% endblock %} </title>
+    <link href="https://fonts.googleapis.com/css2?family=UnifrakturCook:wght@700&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header class="codex-header">
+        <div class="logo-title-container">
+            <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Calenh Logo" class="header-logo">
+            <h1>Calenh</h1>
+        
+        </div>
+        <p>Interactive Courses</p>
+    </header>
+
+    <nav class="codex-nav">
+        <a href="{{ url_for('explore') }}">Library</a>
+        {% if current_user.is_authenticated %}
+            <a href="{{ url_for('dashboard') }}">My Shelf</a>
+            <a href="{{ url_for('creator_dashboard') }}">Write a Course</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+            {% if current_user.is_admin %}
+                <a href="{{ url_for('admin_dashboard') }}" style="color: #c8811a; font-weight: bold;">Admin Panel</a>
+            {% endif %}
+        {% else %}
+            <a href="{{ url_for('login') }}">Login</a>
+            <a href="{{ url_for('register') }}">Register</a>
+        {% endif %}
+    </nav>
+    
+    <main class="codex-main">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        {% block content %}{% endblock %}
+    </main>
+    
+    <footer class="codex-footer">
+        © 2025 Calenh Codex. Illuminating minds since MMXXV.
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

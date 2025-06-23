@@ -1,0 +1,64 @@
+
+{% extends "base.html" %}
+{% block title %}{{ lesson.title }}{% endblock %}
+
+{% block content %}
+<style>
+    .reader-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .reader-header h1 {
+        font-family: 'Playfair Display', serif;
+        font-size: 2.8rem;
+        margin-bottom: 0.5rem;
+    }
+    .chapter-content-body {
+        background: #ffffff;
+        padding: 2rem 3rem;
+        border: 1px solid #e5ded2;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    .reader-nav {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 2rem;
+        padding: 1rem;
+        background: #fdfbf7;
+        border-radius: 6px;
+    }
+</style>
+
+<div class="reader-header">
+    <a href="{{ url_for('manage_course', course_id=course.id) }}" class="back-link">← Back to {{ course.title }}</a>
+    <h1>{{ lesson.title }}</h1>
+    <p>Chapter {{ lesson.chapter_number }}</p>
+</div>
+
+<div class="chapter-content-body">
+    {# This is where the magic happens. We load the custom CSS for the content. #}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/reader_theme.css') }}">
+    
+    {# The |safe filter is CRITICAL. It tells Jinja to render the HTML as-is. #}
+    {{ lesson.content_html|safe }}
+</div>
+
+<div class="reader-nav">
+    <div>
+        {% if prev_chapter_num %}
+            <a href="{{ url_for('chapter_reader_view', course_id=course.id, chapter_number=prev_chapter_num) }}" class="btn btn-secondary">
+                ← Previous Chapter
+            </a>
+        {% endif %}
+    </div>
+    <div>
+        {% if next_chapter_num %}
+            <a href="{{ url_for('chapter_reader_view', course_id=course.id, chapter_number=next_chapter_num) }}" class="btn btn-primary">
+                Next Chapter →
+            </a>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+    <h2>Admin Dashboard</h2>
+    <p>Review courses submitted by creators.</p>
+
+    <hr class="section-divider">
+
+    <h3>Courses Pending Review ({{ pending_courses|length }})</h3>
+    {% if pending_courses %}
+        <ul class="course-list">
+            {% for course in pending_courses %}
+                <li class="course-item">
+                    <div class="course-info">
+                        <h3 class="course-title">{{ course.title }}</h3>
+                        <p class="course-meta">By: {{ course.creator.username }}</p>
+                    </div>
+                    <div class="course-actions">
+                        <a href="{{ url_for('course_player', course_id=course.id) }}" class="btn btn-secondary" target="_blank">Preview Course</a>
+                        
+                        <form action="{{ url_for('decide_course', course_id=course.id) }}" method="post" style="display:inline;">
+                        	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="decision" value="approve">
+                            <button type="submit" class="btn btn-primary">Approve</button>
+                        </form>
+
+                        <form action="{{ url_for('decide_course', course_id=course.id) }}" method="post" style="display:inline;">
+                        	<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="decision" value="reject">
+                            <button type="submit" class="btn btn-danger">Reject</button>
+                        </form>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>There are no courses currently awaiting review.</p>
+    {% endif %}
+{% endblock %}

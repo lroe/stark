@@ -1,0 +1,44 @@
+
+{% extends "base.html" %}
+{% block title %}Reviews for {{ course.title }}{% endblock %}
+{% block content %}
+    <div class="page-header">
+        <a href="{{ url_for('explore') }}" class="back-link">← Back to Explore</a>
+        <h1>Reviews for: {{ course.title }}</h1>
+    </div>
+
+    <div class="overall-rating-summary">
+        {% if course.reviews.count() > 0 %}
+            <div class="average-rating-display">
+                <span class="rating-value">{{ "%.1f"|format(course.average_rating) }}</span>
+                <span class="rating-stars">★</span>
+                <span class="total-reviews">from {{ course.reviews.count() }} review(s)</span>
+            </div>
+        {% else %}
+            <p>This course has not been reviewed yet.</p>
+        {% endif %}
+    </div>
+
+    <hr class="section-divider">
+
+    <div class="review-list">
+        {% for review in reviews %}
+            <div class="review-item">
+                <div class="review-header">
+                    <span class="review-author">{{ review.user.username }}</span>
+                    <span class="review-rating-display">
+                        {% for i in range(review.rating) %}★{% endfor %}{% for i in range(5 - review.rating) %}☆{% endfor %}
+                    </span>
+                </div>
+                {% if review.comment %}
+                <div class="review-body">
+                    <p class="review-comment-text">{{ review.comment }}</p>
+                </div>
+                {% endif %}
+                <div class="review-footer">
+                    <span>Reviewed on {{ review.created_at.strftime('%B %d, %Y') }}</span>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% endblock %}

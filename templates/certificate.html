@@ -1,0 +1,81 @@
+
+{% extends "base.html" %}
+{% block title %}Certificate of Completion{% endblock %}
+{% block content %}
+    <style>
+        .certificate-container {
+            border: 10px solid #3498db;
+            padding: 50px;
+            text-align: center;
+            background-color: #f9f9f9;
+        }
+        .cert-header {
+            font-size: 48px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .cert-subheader {
+            font-size: 24px;
+            color: #7f8c8d;
+        }
+        .cert-user-name {
+            font-family: 'cursive', 'Brush Script MT', sans-serif;
+            font-size: 40px;
+            margin: 40px 0;
+            border-bottom: 2px solid #ccc;
+            display: inline-block;
+            padding-bottom: 5px;
+        }
+        .cert-course-title {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .cert-date {
+            margin-top: 30px;
+            color: #555;
+        }
+    </style>
+
+    <div class="certificate-container">
+        <div class="cert-header">Certificate of Completion</div>
+        <div class="cert-subheader">This certificate is proudly presented to</div>
+        <div class="cert-user-name">{{ enrollment.user.username }}</div>
+        <div class="cert-subheader">for successfully completing the course</div>
+        <div class="cert-course-title">"{{ enrollment.course.title }}"</div>
+        <div class="cert-date">
+            Completed on: {{ enrollment.completed_at.strftime('%B %d, %Y') }}
+        </div>
+    </div>
+    <hr class="section-divider">
+
+    <div class="review-form-container">
+        {% if existing_review %}
+            <h2>Thank You for Your Feedback!</h2>
+            <p>You rated this course {{ existing_review.rating }} out of 5 stars.</p>
+            <a href="{{ url_for('reviews_page', course_id=enrollment.course.id) }}" class="btn btn-secondary">View All Reviews</a>
+        {% else %}
+            <h2>Leave a Review</h2>
+            <p>Help other students by sharing your feedback on the course.</p>
+            <form action="{{ url_for('submit_review', course_id=enrollment.course.id) }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group">
+                    <label>Rating</label>
+                    <div class="star-rating">
+                        <!-- CSS will make these radio buttons look like stars -->
+                        <input type="radio" id="5-stars" name="rating" value="5" required /><label for="5-stars">★</label>
+                        <input type="radio" id="4-stars" name="rating" value="4" /><label for="4-stars">★</label>
+                        <input type="radio" id="3-stars" name="rating" value="3" /><label for="3-stars">★</label>
+                        <input type="radio" id="2-stars" name="rating" value="2" /><label for="2-stars">★</label>
+                        <input type="radio" id="1-star" name="rating" value="1" /><label for="1-star">★</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="comment">Your Review (Optional)</label>
+                    <textarea id="comment" name="comment" rows="4" placeholder="What did you like or dislike? How could it be improved?"></textarea>
+                </div>
+                <button type="submit">Submit Review</button>
+            </form>
+        {% endif %}
+    </div>
+{% endblock %}

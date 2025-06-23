@@ -1,0 +1,23 @@
+
+/* /static/css/editor_theme.css */
+
+body {
+  font-family: 'Libre Baskerville', serif;
+  font-size: 1.1rem;
+  line-height: 1.8;
+  color: #2e2e2e;
+  background-color: #ffffff; /* Match the editor background */
+  padding: 1rem;
+}
+
+p {
+  margin-top: 0;
+}
+
+img, video {
+  max-width: 100%;
+  margin: 1rem 0;
+  display: block;
+  border-radius: 6px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
