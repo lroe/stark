@@ -138,7 +138,8 @@
                         chapterIds.push(item.dataset.id);
                     }
                     
-                    const csrfToken = document.querySelector('input[name="csrf_token"]').value;
+                    const csrfTokenEl = document.querySelector('input[name="csrf_token"]');
+                    const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
 
                     fetch(`/course/{{ course.id }}/reorder_chapters`, {
                         method: 'POST',
