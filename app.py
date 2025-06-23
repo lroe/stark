@@ -17,7 +17,10 @@ from functools import wraps
 load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "a-strong-default-secret-key-for-dev")
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///coursewell.db'
+if os.getenv("POSTGRES_URL"):
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("POSTGRES_URL").replace("postgres://", "postgresql://")
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///coursewell.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
