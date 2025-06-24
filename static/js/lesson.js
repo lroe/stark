@@ -102,7 +102,11 @@ document.addEventListener('DOMContentLoaded', () => {
         messageDiv.innerHTML = marked.parse(text);
         chatBox.appendChild(messageDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
-        MathJax.typesetPromise([messageDiv]).catch((err) => console.log('MathJax error:', err));
+        
+        // FIX: Use the correct MathJax v3 command
+        if (window.MathJax) {
+            window.MathJax.typeset([messageDiv]);
+        }
     }
 
     function addImageMessage(url, alt) {
