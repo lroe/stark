@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import base64 # Import the base64 library
 import google.generativeai as genai
 from flask import Flask, request, render_template, jsonify, url_for, flash, redirect, session, abort
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
@@ -27,22 +28,28 @@ login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
 # --- Firebase Initialization ---
+db = None # Initialize db as None
 FIREBASE_WEB_API_KEY = os.getenv("FIREBASE_WEB_API_KEY")
-firebase_credentials_json = os.getenv('FIREBASE_ADMIN_SDK')
 
 try:
-    if firebase_credentials_json:
-        cred_dict = json.loads(firebase_credentials_json)
+    # Check for the Vercel environment variable FIRST
+    firebase_creds_b64 = os.getenv('FIREBASE_ADMIN_SDK_BASE64')
+    if firebase_creds_b64:
+        print("Found FIREBASE_ADMIN_SDK_BASE64 env var. Decoding...")
+        decoded_creds_bytes = base64.b64decode(firebase_creds_b64)
+        cred_dict = json.loads(decoded_creds_bytes.decode('utf-8'))
         cred = credentials.Certificate(cred_dict)
+        print("Successfully parsed decoded credentials.")
     else:
+        # Fallback for local development using the JSON file
+        print("Using local firebase-adminsdk.json file.")
         cred = credentials.Certificate('firebase-adminsdk.json')
     
     firebase_admin.initialize_app(cred)
     print("Firebase Admin SDK initialized successfully.")
-    db = firestore.client()
+    db = firestore.client() # Assign db client here
 except Exception as e:
-    print(f"ERROR: Could not initialize Firebase Admin SDK: {e}")
-    db = None
+    print(f"FATAL ERROR: Could not initialize Firebase Admin SDK: {e}")
 
 if os.getenv("GEMINI_API_KEY"):
     genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
@@ -74,7 +81,26 @@ def load_user(user_id):
         print(f"Error loading user {user_id}: {e}")
     return None
 
-# --- Prompts ---
+# --- Helper Functions & Decorators ---
+def _doc_to_dict(doc):
+    if not doc.exists: return None
+    doc_dict = doc.to_dict()
+    doc_dict['id'] = doc.id
+    return doc_dict
+
+def check_db_connection(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not db:
+            flash("The application is not connected to the database. Please contact the administrator.", "danger")
+            return render_template('explore.html', courses=[])
+        return f(*args, **kwargs)
+    return decorated_function
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    
+# --- AI and Parsing Functions ---
 PARSER_PROMPT = """
 You are a precise curriculum parsing agent. Your task is to convert a teacher's lesson script into a structured JSON object. You MUST follow these rules exactly.
 1. The final JSON object MUST have a single top-level key: "steps".
@@ -86,30 +112,19 @@ You are a precise curriculum parsing agent. Your task is to convert a teacher's 
 
 Parse the following script:
 """
-# ... other prompts can be added here ...
-
-# --- Helper Functions & Decorators ---
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def _doc_to_dict(doc):
-    if not doc.exists: return None
-    doc_dict = doc.to_dict()
-    doc_dict['id'] = doc.id
-    return doc_dict
-
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            flash("You do not have permission to access this page.", "danger")
-            return redirect(url_for('index'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-# --- AI Functions (Assuming they are complete) ---
-# ... (parse_lesson_script, get_tutor_response, RAG functions, etc.)
+def parse_lesson_script(script_text):
+    if not os.getenv("GEMINI_API_KEY"):
+        print("Warning: GEMINI_API_KEY not set. Using basic parser.")
+        return {'steps': [{'type': 'CONTENT', 'text': script_text}]}
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        response = model.generate_content(PARSER_PROMPT + script_text)
+        cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
+        parsed_json = json.loads(cleaned_response)
+        return parsed_json if isinstance(parsed_json, dict) and 'steps' in parsed_json else None
+    except Exception as e:
+        print(f"Error during parsing: {e}")
+        return None
 
 # --- Main Routes ---
 @app.route('/')
@@ -117,6 +132,7 @@ def index():
     return redirect(url_for('explore'))
 
 @app.route('/explore')
+@check_db_connection
 def explore():
     courses_query = db.collection('courses').where('status', '==', 'published').stream()
     courses = [_doc_to_dict(c) for c in courses_query]
@@ -130,8 +146,8 @@ def explore():
     
     return render_template('explore.html', courses=courses)
 
-
 @app.route('/course/<string:course_id>')
+@check_db_connection
 def course_detail_page(course_id):
     course_doc = db.collection('courses').document(course_id).get()
     if not course_doc.exists: abort(404)
@@ -151,9 +167,9 @@ def course_detail_page(course_id):
     
     return render_template('course_detail.html', course=course, share_id=share_id)
 
-
 # --- Authentication Routes ---
 @app.route('/register', methods=['GET', 'POST'])
+@check_db_connection
 def register():
     if current_user.is_authenticated: return redirect(url_for('dashboard'))
     if request.method == 'POST':
@@ -179,6 +195,10 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    if not db:
+        flash("Database not connected. Login is temporarily disabled.", "danger")
+        return render_template('login.html')
+        
     if current_user.is_authenticated: return redirect(url_for('dashboard'))
     if request.method == 'POST':
         username, password = request.form.get('username'), request.form.get('password')
@@ -208,17 +228,16 @@ def login():
     return render_template('login.html')
 
 @app.route('/logout')
-@login_required
 def logout():
     logout_user()
     session.clear()
     flash('You have been logged out.', 'info')
     return redirect(url_for('login'))
 
-
 # --- Logged-in User Routes ---
 @app.route('/dashboard')
 @login_required
+@check_db_connection
 def dashboard():
     enrollments_query = db.collection('enrollments').where('user_id', '==', current_user.id).stream()
     enrollments = [_doc_to_dict(e) for e in enrollments_query]
@@ -241,6 +260,7 @@ def dashboard():
 
 @app.route('/creator')
 @login_required
+@check_db_connection
 def creator_dashboard():
     courses_query = db.collection('courses').where('user_id', '==', current_user.id).stream()
     created_courses = [_doc_to_dict(c) for c in courses_query]
@@ -248,6 +268,7 @@ def creator_dashboard():
 
 @app.route('/course/create', methods=['POST'])
 @login_required
+@check_db_connection
 def create_course():
     title = request.form.get('title')
     if not title:
@@ -266,6 +287,7 @@ def create_course():
 
 @app.route('/course/<string:course_id>/manage')
 @login_required
+@check_db_connection
 def manage_course(course_id):
     course_doc = db.collection('courses').document(course_id).get()
     if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
@@ -276,6 +298,7 @@ def manage_course(course_id):
 
 @app.route('/course/<string:course_id>/add_chapter', methods=['GET'])
 @login_required
+@check_db_connection
 def add_chapter_page(course_id):
     course_doc = db.collection('courses').document(course_id).get()
     if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
@@ -283,6 +306,7 @@ def add_chapter_page(course_id):
 
 @app.route('/course/<string:course_id>/save_chapter', methods=['POST'])
 @login_required
+@check_db_connection
 def save_chapter(course_id):
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
@@ -293,8 +317,10 @@ def save_chapter(course_id):
         flash('Both a title and script are required.', 'warning')
         return redirect(url_for('add_chapter_page', course_id=course_id))
     
-    # This logic is just for demonstration as the AI function is stubbed
-    parsed_data = {'steps': [{'type': 'CONTENT', 'text': script}]} 
+    parsed_data = parse_lesson_script(script)
+    if not parsed_data:
+        flash('The AI could not understand the lesson structure. Please check your tags and try again.', 'danger')
+        return redirect(url_for('add_chapter_page', course_id=course_id))
     
     last_chapter_query = db.collection('lessons').where('course_id', '==', course_id).order_by('chapter_number', direction=firestore.Query.DESCENDING).limit(1).stream()
     last_chapter_list = list(last_chapter_query)
@@ -313,6 +339,7 @@ def save_chapter(course_id):
 
 @app.route('/chapter/<string:lesson_id>/delete', methods=['POST'])
 @login_required
+@check_db_connection
 def delete_chapter(lesson_id):
     lesson_ref = db.collection('lessons').document(lesson_id)
     lesson_doc = lesson_ref.get()
@@ -346,6 +373,7 @@ def delete_chapter(lesson_id):
 
 @app.route('/course/<string:course_id>/enroll', methods=['POST'])
 @login_required
+@check_db_connection
 def enroll_in_course(course_id):
     course_doc = db.collection('courses').document(course_id).get()
     if not course_doc.exists: abort(404)
@@ -366,6 +394,7 @@ def enroll_in_course(course_id):
 
 @app.route('/course/<string:course_id>/review', methods=['POST'])
 @login_required
+@check_db_connection
 def submit_review(course_id):
     rating_str = request.form.get('rating')
     comment = request.form.get('comment')
@@ -411,6 +440,7 @@ def submit_review(course_id):
     return redirect(url_for('reviews_page', course_id=course_id))
 
 @app.route('/course/<string:course_id>/reviews')
+@check_db_connection
 def reviews_page(course_id):
     course_doc = db.collection('courses').document(course_id).get();
     if not course_doc.exists: abort(404)
@@ -426,12 +456,9 @@ def reviews_page(course_id):
     
     return render_template('reviews.html', course=course, reviews=reviews)
 
-
-# --- Other routes that need to exist for templates ---
-# (Many of these are simplified but functional)
-
 @app.route('/course/<string:course_id>/player')
 @login_required
+@check_db_connection
 def course_player(course_id):
     enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', course_id).limit(1).stream()
     enrollment_list = list(enrollment_query)
@@ -457,6 +484,7 @@ def course_player(course_id):
 
 @app.route('/course/<string:course_id>/<int:chapter_number>')
 @login_required
+@check_db_connection
 def student_chapter_view(course_id, chapter_number):
     course_doc = db.collection('courses').document(course_id).get()
     if not course_doc.exists: abort(404)
@@ -488,9 +516,9 @@ def student_chapter_view(course_id, chapter_number):
             
     return render_template('course_player.html', course=course, current_lesson=lesson, enrollment=enrollment, initial_history=initial_history_data)
 
-
 @app.route('/course/<string:course_id>/certificate')
 @login_required
+@check_db_connection
 def certificate_view(course_id):
     enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', course_id).limit(1).stream()
     enrollment_list = list(enrollment_query)
@@ -510,39 +538,153 @@ def certificate_view(course_id):
 
     return render_template('certificate.html', enrollment=enrollment, existing_review=existing_review)
 
+@app.route('/course/<string:course_id>/update_details', methods=['POST'])
+@login_required
+@check_db_connection
+def update_course_details(course_id):
+    course_ref = db.collection('courses').document(course_id)
+    course_doc = course_ref.get()
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    
+    update_data = {'description': request.form.get('description')}
+    if 'thumbnail' in request.files:
+        file = request.files['thumbnail']
+        if file and file.filename != '':
+            filename = str(uuid.uuid4()) + os.path.splitext(file.filename)[1]
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            update_data['thumbnail_url'] = url_for('static', filename=f'uploads/{filename}', _external=True)
 
-# Placeholder routes to prevent startup errors
+    if update_data:
+        course_ref.update(update_data)
+        flash('Course details updated successfully!', 'success')
+        
+    return redirect(url_for('manage_course', course_id=course_id))
+
+@app.route('/chapter/<string:lesson_id>/edit')
+@login_required
+@check_db_connection
+def edit_chapter_page(lesson_id):
+    lesson_doc = db.collection('lessons').document(lesson_id).get()
+    if not lesson_doc.exists: abort(404)
+    lesson = _doc_to_dict(lesson_doc)
+    course_doc = db.collection('courses').document(lesson['course_id']).get()
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    lesson['course'] = _doc_to_dict(course_doc)
+    return render_template('edit_chapter.html', lesson=lesson)
+
+@app.route('/chapter/<string:lesson_id>/update', methods=['POST'])
+@login_required
+@check_db_connection
+def update_chapter(lesson_id):
+    lesson_ref = db.collection('lessons').document(lesson_id)
+    lesson_doc = lesson_ref.get()
+    if not lesson_doc.exists: abort(404)
+    lesson = _doc_to_dict(lesson_doc)
+    
+    course_doc = db.collection('courses').document(lesson['course_id']).get()
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    
+    parsed_data = parse_lesson_script(request.form['script'])
+    if not parsed_data:
+        flash('The AI could not understand the lesson structure.', 'danger')
+        return redirect(url_for('edit_chapter_page', lesson_id=lesson_id))
+
+    lesson_ref.update({
+        'title': request.form['title'], 'raw_script': request.form['script'], 'editor_html': request.form.get('editor_html'),
+        'parsed_json': json.dumps(parsed_data)
+    })
+    
+    flash('Chapter updated successfully!', 'success')
+    return redirect(url_for('manage_course', course_id=lesson['course_id']))
+
+@app.route('/course/<string:course_id>/submit_for_review', methods=['POST'])
+@login_required
+@check_db_connection
+def submit_for_review(course_id):
+    course_ref = db.collection('courses').document(course_id)
+    course_doc = course_ref.get()
+    if course_doc.exists and course_doc.to_dict().get('user_id') == current_user.id:
+        course_ref.update({'status': 'pending_review'})
+        flash('Course submitted for review!', 'success')
+    return redirect(url_for('manage_course', course_id=course_id))
+
+@app.route('/course/<string:course_id>/unpublish', methods=['POST'])
+@login_required
+@check_db_connection
+def unpublish_course(course_id):
+    course_ref = db.collection('courses').document(course_id)
+    course_doc = course_ref.get()
+    if course_doc.exists and (course_doc.to_dict().get('user_id') == current_user.id or current_user.is_admin):
+        course_ref.update({'status': 'draft'})
+        flash('Course returned to draft status.', 'info')
+    return redirect(url_for('manage_course', course_id=course_id))
+
+@app.route('/admin/dashboard')
+@login_required
+@check_db_connection
+def admin_dashboard():
+    if not current_user.is_admin: abort(403)
+    pending_courses_query = db.collection('courses').where('status', '==', 'pending_review').stream()
+    pending_courses = [_doc_to_dict(c) for c in pending_courses_query]
+    
+    creator_ids = list({c['user_id'] for c in pending_courses if 'user_id' in c})
+    if creator_ids:
+        creators_query = db.collection('users').where(firestore.FieldPath.document_id(), 'in', creator_ids).stream()
+        creators = {cr.id: _doc_to_dict(cr) for cr in creators_query}
+        for course in pending_courses:
+            course['creator'] = creators.get(course['user_id'])
+            
+    return render_template('admin_dashboard.html', pending_courses=pending_courses)
+
+@app.route('/admin/course/<string:course_id>/decide', methods=['POST'])
+@login_required
+@check_db_connection
+def decide_course(course_id):
+    if not current_user.is_admin: abort(403)
+    course_ref = db.collection('courses').document(course_id)
+    course_doc = course_ref.get()
+    if not course_doc.exists: abort(404)
+    decision = request.form.get('decision')
+    
+    if decision == 'approve':
+        course_ref.update({'status': 'published'})
+        flash('Course approved and published.', 'success')
+    elif decision == 'reject':
+        course_ref.update({'status': 'rejected'})
+        flash('Course rejected and returned to creator.', 'warning')
+        
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/course/<string:course_id>/generate_link', methods=['POST'])
+@login_required
+@check_db_connection
+def generate_share_link(course_id):
+    course_ref = db.collection('courses').document(course_id)
+    course_doc = course_ref.get()
+    if course_doc.exists and course_doc.to_dict().get('user_id') == current_user.id:
+        if not course_doc.to_dict().get('shareable_link_id'):
+            course_ref.update({'shareable_link_id': str(uuid.uuid4())})
+    return redirect(url_for('manage_course', course_id=course_id))
+
+@app.route('/share/<string:link_id>')
+@check_db_connection
+def shared_course_view(link_id):
+    course_query = db.collection('courses').where('shareable_link_id', '==', link_id).limit(1).stream()
+    course_list = list(course_query)
+    if not course_list: abort(404)
+    course = _doc_to_dict(course_list[0])
+    return redirect(url_for('course_detail_page', course_id=course['id'], share_id=link_id))
+    
+# --- Chat Routes (currently non-functional stubs) ---
 @app.route('/chat', methods=['POST'])
-def chat(): return jsonify({"error": "Chat not fully implemented in this stub."}), 501
+def chat(): return jsonify({"error": "Chat not implemented"}), 501
 @app.route('/chat/intent', methods=['POST'])
 def classify_intent(): return jsonify({"intent": "QNA", "query": "test"})
 @app.route('/chat/reset', methods=['POST'])
 def reset_conversation(): return jsonify({'success': True})
 @app.route('/chat/delete_last_turn', methods=['POST'])
 def delete_last_turn(): return jsonify({'success': False, 'message': 'Not implemented'})
-@app.route('/course/<string:course_id>/update_details', methods=['POST'])
-def update_course_details(course_id): return redirect(url_for('manage_course', course_id=course_id))
-@app.route('/chapter/<string:lesson_id>/edit')
-def edit_chapter_page(lesson_id): return redirect(url_for('creator_dashboard'))
-@app.route('/chapter/<string:lesson_id>/update', methods=['POST'])
-def update_chapter(lesson_id): return redirect(url_for('creator_dashboard'))
-@app.route('/course/<string:course_id>/submit_for_review', methods=['POST'])
-def submit_for_review(course_id): return redirect(url_for('manage_course', course_id=course_id))
-@app.route('/course/<string:course_id>/unpublish', methods=['POST'])
-def unpublish_course(course_id): return redirect(url_for('manage_course', course_id=course_id))
-@app.route('/admin/dashboard')
-@login_required
-@admin_required
-def admin_dashboard(): return render_template('admin_dashboard.html', pending_courses=[])
-@app.route('/admin/course/<string:course_id>/decide', methods=['POST'])
-@login_required
-@admin_required
-def decide_course(course_id): return redirect(url_for('admin_dashboard'))
-@app.route('/course/<string:course_id>/generate_link', methods=['POST'])
-@login_required
-def generate_share_link(course_id): return redirect(url_for('manage_course', course_id=course_id))
-@app.route('/share/<string:link_id>')
-def shared_course_view(link_id): return redirect(url_for('explore'))
 
 if __name__ == '__main__':
     app.run(debug=True)
