@@ -609,13 +609,39 @@ def update_course_details(course_id):
     if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
     
     update_data = {'description': request.form.get('description')}
+    
+    # Check if a thumbnail file was uploaded
     if 'thumbnail' in request.files:
         file = request.files['thumbnail']
         if file and file.filename != '':
-            filename = str(uuid.uuid4()) + os.path.splitext(file.filename)[1]
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            update_data['thumbnail_url'] = url_for('static', filename=f'uploads/{filename}', _external=True)
+            try:
+                # Get your storage bucket
+                # The bucket name is usually your project ID + ".appspot.com"
+                # e.g., "claenh-db.appspot.com"
+                bucket = storage.bucket() 
+                
+                # Create a unique filename for the blob
+                filename = f"course_thumbnails/{course_id}/{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
+                
+                # Create a blob object
+                blob = bucket.blob(filename)
+                
+                # Upload the file from the user's request, specifying the content type
+                blob.upload_from_file(
+                    file,
+                    content_type=file.content_type
+                )
+                
+                # Make the blob publicly viewable
+                blob.make_public()
+                
+                # Get the public URL and save it to Firestore
+                update_data['thumbnail_url'] = blob.public_url
+
+            except Exception as e:
+                print(f"Error uploading to Firebase Storage: {e}")
+                flash("There was an error uploading the thumbnail. Please try again.", "danger")
+                return redirect(url_for('manage_course', course_id=course_id))
 
     if update_data:
         course_ref.update(update_data)
