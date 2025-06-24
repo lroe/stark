@@ -814,9 +814,11 @@ def chat():
     lessons_query = db.collection('lessons').where('course_id', '==', course['id']).order_by('chapter_number').stream()
     course['lessons'] = [_doc_to_dict(l) for l in lessons_query]
 
-    lesson_steps = json.loads(lesson['parsed_json']).get('steps', [])
+    lesson_steps = json.loads(lesson.get('parsed_json', '{}')).get('steps', [])
 
+    # --- Intent Handling ---
     if request_type == 'MEDIA_REQUEST':
+        # This logic is self-contained and correct
         requested_alt_text = user_input
         media_to_show = next((step for step in lesson_steps if step.get('type') == 'MEDIA' and step.get('alt_text') == requested_alt_text), None)
         if media_to_show:
@@ -828,6 +830,7 @@ def chat():
         else:
             request_type = 'QNA'
 
+    # --- State Loading ---
     enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.uid).where('course_id', '==', course['id']).limit(1).stream()
     enrollment_list = list(enrollment_query)
     enrollment_doc = enrollment_list[0] if enrollment_list else None
@@ -850,44 +853,54 @@ def chat():
             chat_log = json.loads(history_record.get('history_json', '[]'))
         else:
             history_record_ref = db.collection('chat_histories').document()
-    else:
+    else: # Preview mode
         if session_key in session and user_input is not None:
-             chat_log, step_index, chunk_index = session[session_key].get('chat_log', []), session[session_key].get('step_index', 0), session[session_key].get('chunk_index', 0)
+             chat_log = session.get(session_key, {}).get('chat_log', [])
+             step_index = session.get(session_key, {}).get('step_index', 0)
+             chunk_index = session.get(session_key, {}).get('chunk_index', 0)
         else:
              session[session_key] = {'step_index': 0, 'chunk_index': 0, 'chat_log': []}
 
+    # --- Log User Input ---
     if user_input and request_type == 'LESSON_FLOW' and user_input != 'Continue':
         chat_log.append({"sender": "student", "type": "text", "content": user_input})
     
+    # --- Q&A Path ---
     if request_type == 'QNA':
         chat_log.append({"sender": "student", "type": "text", "content": user_input})
         retriever = _get_or_create_rag_retriever(lesson['id'], lesson['raw_script'])
         response_text = answer_question_with_rag(user_input, retriever)
         chat_log.append({"sender": "tutor", "type": "text", "content": response_text})
         
-        if history_record_ref: 
-            if history_record_ref.get().exists: history_record_ref.update({'history_json': json.dumps(chat_log)})
-            else: history_record_ref.set({'enrollment_id': enrollment_doc.id, 'lesson_id': lesson_id, 'history_json': json.dumps(chat_log), 'current_step_index': 0, 'current_chunk_index': 0})
-        else: session[session_key]['chat_log'] = chat_log; session.modified = True
+        # Save Q&A state
+        if history_record_ref:
+            update_payload = {'history_json': json.dumps(chat_log)}
+            if history_record_ref.get().exists:
+                history_record_ref.update(update_payload)
+            else:
+                history_record_ref.set({**update_payload, 'enrollment_id': enrollment_doc.id, 'lesson_id': lesson_id, 'current_step_index': step_index, 'current_chunk_index': chunk_index})
+        else:
+            session[session_key]['chat_log'] = chat_log
+            session.modified = True
         
         return jsonify({'is_qna_response': True, 'tutor_text': response_text})
 
+    # --- Main Lesson Flow State Machine ---
     response_data, model_response_text = {}, ""
     next_step_index, next_chunk_index = step_index, chunk_index
 
     if step_index >= len(lesson_steps):
         response_data['is_lesson_end'] = True
         model_response_text = "Congratulations! You've completed this chapter."
-        if enrollment and enrollment['last_completed_chapter_number'] < lesson['chapter_number']:
+        if enrollment and enrollment.get('last_completed_chapter_number', 0) < lesson['chapter_number']:
             enrollment_doc.reference.update({'last_completed_chapter_number': lesson['chapter_number']})
             if lesson['chapter_number'] >= len(course['lessons']):
                 if not enrollment.get('completed_at'):
                     enrollment_doc.reference.update({'completed_at': firestore.SERVER_TIMESTAMP})
                 response_data['certificate_url'] = url_for('certificate_view', course_id=course['id'])
             else:
-                next_chapter = next((l for l in course['lessons'] if l['chapter_number'] == lesson['chapter_number'] + 1), None)
-                if next_chapter:
-                    response_data['next_chapter_url'] = url_for('student_chapter_view', course_id=course['id'], chapter_number=next_chapter['chapter_number'])
+                next_chapter_num = lesson['chapter_number'] + 1
+                response_data['next_chapter_url'] = url_for('student_chapter_view', course_id=course['id'], chapter_number=next_chapter_num)
     else:
         current_step = lesson_steps[step_index]
         step_type = current_step.get('type')
@@ -895,12 +908,14 @@ def chat():
         if step_type == 'CONTENT':
             content_chunks = [chunk for chunk in current_step.get('text', '').split('\n\n') if chunk.strip()]
             if chunk_index < len(content_chunks):
-                prompt = TUTOR_PROMPT_TEMPLATE['CONTENT'].format(content_chunks[chunk_index])
+                chunk_to_explain = content_chunks[chunk_index]
+                prompt = TUTOR_PROMPT_TEMPLATE['CONTENT'].format(chunk_to_explain)
                 model_response_text = get_tutor_response(prompt)
                 chat_log.append({"sender": "tutor", "type": "text", "content": model_response_text})
                 next_chunk_index = chunk_index + 1
             if next_chunk_index >= len(content_chunks):
-                next_step_index, next_chunk_index = step_index + 1, 0
+                next_step_index += 1
+                next_chunk_index = 0
         else:
             if step_type == 'MEDIA':
                 media_type = current_step.get('media_type', 'image')
@@ -914,15 +929,22 @@ def chat():
                 chat_log.append({"sender": "tutor", "type": "text", "content": model_response_text})
                 response_data['question'] = current_step
             
-            next_step_index, next_chunk_index = step_index + 1, 0
+            next_step_index += 1
+            next_chunk_index = 0
 
-    if model_response_text: response_data['tutor_text'] = model_response_text
+    if model_response_text: 
+        response_data['tutor_text'] = model_response_text
 
+    # --- State Saving ---
     update_payload = {'current_step_index': next_step_index, 'current_chunk_index': next_chunk_index, 'history_json': json.dumps(chat_log)}
     if history_record_ref:
-        if history_record_ref.get().exists: history_record_ref.update(update_payload)
-        else: history_record_ref.set({**update_payload, 'enrollment_id': enrollment_doc.id, 'lesson_id': lesson_id})
-    else:
+        # Check if the document exists before trying to update it
+        if history_record_ref.get().exists:
+            history_record_ref.update(update_payload)
+        else:
+            # It's a new history record, so set it with all required fields
+            history_record_ref.set({**update_payload, 'enrollment_id': enrollment_doc.id, 'lesson_id': lesson_id})
+    else: # Preview mode
         session[session_key] = update_payload
         session.modified = True
     
