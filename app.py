@@ -1,7 +1,7 @@
 import os
 import json
 import uuid
-import base64 # Import the base64 library
+import base64
 import google.generativeai as genai
 from flask import Flask, request, render_template, jsonify, url_for, flash, redirect, session, abort
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
@@ -96,10 +96,19 @@ def check_db_connection(f):
             return render_template('explore.html', courses=[])
         return f(*args, **kwargs)
     return decorated_function
+    
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            flash("You do not have permission to access this page.", "danger")
+            return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-    
+
 # --- AI and Parsing Functions ---
 PARSER_PROMPT = """
 You are a precise curriculum parsing agent. Your task is to convert a teacher's lesson script into a structured JSON object. You MUST follow these rules exactly.
@@ -112,6 +121,24 @@ You are a precise curriculum parsing agent. Your task is to convert a teacher's 
 
 Parse the following script:
 """
+TUTOR_PROMPT_TEMPLATE = {
+    "CONTENT": "You are a friendly and engaging tutor. Your task is to teach the following information to a student. Your goal is to be comprehensive and ensure no details are lost. Explain the provided text clearly, including all examples and specific terms mentioned. After explaining the content, ask a simple question to prompt the user to continue, like 'Does that make sense?' or 'Shall we move on?'.\n\nHere is the text to explain:\n---\n{}\n---",
+    "MEDIA_IMAGE": "An image with the description '{}' has just been shown. Briefly call the student's attention to it and ask if they are ready to continue.",
+    "MEDIA_AUDIO": "An audio clip with the description '{}' is available to play. Briefly encourage the student to listen to it and ask if they are ready to continue when they're done.",
+    "QUESTION": "Okay, time for a quick question to check your understanding: {}"
+}
+INTENT_CLASSIFIER_PROMPT = "You are an intent classification agent. Your task is to analyze a user's input during a lesson and determine their intent. The user's input is: '{}'. The available media descriptions in this lesson are: {}. You MUST respond with a single, specific JSON object. Choose ONE of the following intents:\n\n1.  If the user is asking a general question about the lesson content, respond with:\n    {{\"intent\": \"QNA\", \"query\": \"the user's original question\"}}\n\n2.  If the user is asking to see a specific piece of media again AND their request matches one of the available media descriptions, respond with:\n    {{\"intent\": \"MEDIA_REQUEST\", \"alt_text\": \"the matching media description from the list\"}}\n\n3.  If the user's request is unclear or doesn't fit the above, default to a general question:\n    {{\"intent\": \"QNA\", \"query\": \"the user's original question\"}}\n\nUser Input: '{}'"
+
+def get_tutor_response(full_prompt):
+    if not os.getenv("GEMINI_API_KEY"): return "AI Tutor is not configured."
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        response = model.generate_content(full_prompt)
+        return response.text if response.text else "Let's try that another way."
+    except Exception as e:
+        print(f"Error getting tutor response: {e}")
+        return "I seem to be having a little trouble thinking. Could you try again?"
+
 def parse_lesson_script(script_text):
     if not os.getenv("GEMINI_API_KEY"):
         print("Warning: GEMINI_API_KEY not set. Using basic parser.")
@@ -125,6 +152,41 @@ def parse_lesson_script(script_text):
     except Exception as e:
         print(f"Error during parsing: {e}")
         return None
+
+def _get_or_create_rag_retriever(lesson_id, lesson_script):
+    if lesson_id in RAG_RETRIEVERS: return RAG_RETRIEVERS[lesson_id]
+    if not os.getenv("GEMINI_API_KEY"): return None
+    text_chunks = [chunk for chunk in lesson_script.split('\n\n') if chunk.strip()]
+    if not text_chunks: return None
+    try:
+        result = genai.embed_content(model='models/text-embedding-004', content=text_chunks, task_type="RETRIEVAL_DOCUMENT")
+        embeddings = result['embedding']
+        rag_data = [{'text': chunk, 'embedding': embeddings[i]} for i, chunk in enumerate(text_chunks)]
+        RAG_RETRIEVERS[lesson_id] = rag_data
+        return rag_data
+    except Exception as e:
+        print(f"Error creating RAG embeddings: {e}")
+        return None
+
+def answer_question_with_rag(question, rag_data):
+    if not rag_data: return "I'm sorry, I don't have enough information to answer that."
+    try:
+        query_embedding = genai.embed_content(model='models/text-embedding-004', content=question, task_type="RETRIEVAL_QUERY")['embedding']
+    except Exception as e:
+        print(f"Error embedding RAG query: {e}")
+        return "I had trouble understanding your question. Please try rephrasing."
+
+    def dot_product(v1, v2): return sum(x*y for x, y in zip(v1, v2))
+
+    for item in rag_data:
+        item['similarity'] = dot_product(item['embedding'], query_embedding)
+
+    sorted_data = sorted(rag_data, key=lambda x: x['similarity'], reverse=True)
+    top_chunks = [item['text'] for item in sorted_data[:3]]
+    context = "\n---\n".join(top_chunks)
+    
+    rag_prompt = f"Based ONLY on the following context, provide a concise answer to the user's question. If the context doesn't contain the answer, say \"That's a great question, but it's not covered in this chapter's material.\"\n\nCONTEXT:\n{context}\n\nUSER'S QUESTION:\n{question}"
+    return get_tutor_response(rag_prompt)
 
 # --- Main Routes ---
 @app.route('/')
@@ -166,6 +228,7 @@ def course_detail_page(course_id):
     course['lessons'] = [_doc_to_dict(l) for l in lessons_query]
     
     return render_template('course_detail.html', course=course, share_id=share_id)
+
 
 # --- Authentication Routes ---
 @app.route('/register', methods=['GET', 'POST'])
@@ -233,6 +296,7 @@ def logout():
     session.clear()
     flash('You have been logged out.', 'info')
     return redirect(url_for('login'))
+
 
 # --- Logged-in User Routes ---
 @app.route('/dashboard')
@@ -470,6 +534,9 @@ def course_player(course_id):
     lessons = [_doc_to_dict(l) for l in lessons_query]
     
     if not lessons:
+        if current_user.is_authenticated and current_user.id == db.collection('courses').document(course_id).get().get('user_id'):
+            flash('This course has no chapters yet. Add one to enable the preview.', 'info')
+            return redirect(url_for('manage_course', course_id=course_id))
         flash("This course has no content yet.", "warning")
         return redirect(url_for('explore'))
         
@@ -622,9 +689,9 @@ def unpublish_course(course_id):
 
 @app.route('/admin/dashboard')
 @login_required
+@admin_required
 @check_db_connection
 def admin_dashboard():
-    if not current_user.is_admin: abort(403)
     pending_courses_query = db.collection('courses').where('status', '==', 'pending_review').stream()
     pending_courses = [_doc_to_dict(c) for c in pending_courses_query]
     
@@ -639,9 +706,9 @@ def admin_dashboard():
 
 @app.route('/admin/course/<string:course_id>/decide', methods=['POST'])
 @login_required
+@admin_required
 @check_db_connection
 def decide_course(course_id):
-    if not current_user.is_admin: abort(403)
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
     if not course_doc.exists: abort(404)
@@ -676,15 +743,196 @@ def shared_course_view(link_id):
     course = _doc_to_dict(course_list[0])
     return redirect(url_for('course_detail_page', course_id=course['id'], share_id=link_id))
     
-# --- Chat Routes (currently non-functional stubs) ---
-@app.route('/chat', methods=['POST'])
-def chat(): return jsonify({"error": "Chat not implemented"}), 501
+# --- Chat Routes ---
 @app.route('/chat/intent', methods=['POST'])
-def classify_intent(): return jsonify({"intent": "QNA", "query": "test"})
+@login_required
+@check_db_connection
+def classify_intent():
+    data = request.json
+    user_input = data.get('user_input')
+    lesson_id = data.get('lesson_id')
+
+    lesson_doc = db.collection('lessons').document(lesson_id).get()
+    if not lesson_doc.exists: abort(404)
+    lesson = _doc_to_dict(lesson_doc)
+
+    lesson_steps = json.loads(lesson['parsed_json']).get('steps', [])
+    media_descriptions = [step.get('alt_text') for step in lesson_steps if step.get('type') == 'MEDIA' and step.get('alt_text')]
+    prompt = INTENT_CLASSIFIER_PROMPT.format(user_input, media_descriptions, user_input)
+    
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        response = model.generate_content(prompt)
+        cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
+        intent_data = json.loads(cleaned_response)
+        return jsonify(intent_data)
+    except Exception as e:
+        print(f"Error classifying intent: {e}")
+        return jsonify({"intent": "QNA", "query": user_input})
+
+
+@app.route('/chat', methods=['POST'])
+@login_required
+@check_db_connection
+def chat():
+    data = request.json
+    lesson_id = data.get('lesson_id')
+    user_input = data.get('user_input')
+    request_type = data.get('request_type', 'LESSON_FLOW')
+
+    lesson_doc = db.collection('lessons').document(lesson_id).get()
+    if not lesson_doc.exists: abort(404)
+    lesson = _doc_to_dict(lesson_doc)
+    
+    course_doc = db.collection('courses').document(lesson['course_id']).get()
+    course = _doc_to_dict(course_doc)
+    
+    lessons_query = db.collection('lessons').where('course_id', '==', course['id']).order_by('chapter_number').stream()
+    course['lessons'] = [_doc_to_dict(l) for l in lessons_query]
+
+    lesson_steps = json.loads(lesson['parsed_json']).get('steps', [])
+
+    if request_type == 'MEDIA_REQUEST':
+        requested_alt_text = user_input
+        media_to_show = next((step for step in lesson_steps if step.get('type') == 'MEDIA' and step.get('alt_text') == requested_alt_text), None)
+        if media_to_show:
+            return jsonify({
+                "tutor_text": f"Of course, here is '{media_to_show.get('alt_text')}' again.",
+                "media_url": media_to_show.get('media_url'), "media_type": media_to_show.get('media_type'),
+                "is_qna_response": True
+            })
+        else:
+            request_type = 'QNA'
+
+    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', course['id']).limit(1).stream()
+    enrollment_list = list(enrollment_query)
+    enrollment_doc = enrollment_list[0] if enrollment_list else None
+    enrollment = _doc_to_dict(enrollment_doc) if enrollment_doc else None
+    
+    is_creator = (current_user.id == course['user_id'])
+    if not enrollment and not is_creator and not current_user.is_admin: abort(403)
+
+    history_record_ref, step_index, chunk_index, chat_log = None, 0, 0, []
+    session_key = f'preview_chat_{lesson_id}'
+
+    if enrollment:
+        history_query = db.collection('chat_histories').where('enrollment_id', '==', enrollment_doc.id).where('lesson_id', '==', lesson_id).limit(1).stream()
+        history_list = list(history_query)
+        if history_list:
+            history_record_ref = history_list[0].reference
+            history_record = _doc_to_dict(history_list[0])
+            step_index = history_record.get('current_step_index', 0)
+            chunk_index = history_record.get('current_chunk_index', 0)
+            chat_log = json.loads(history_record.get('history_json', '[]'))
+        else:
+            history_record_ref = db.collection('chat_histories').document()
+    else: # Preview mode
+        if session_key in session and user_input is not None:
+             chat_log, step_index, chunk_index = session[session_key].get('chat_log', []), session[session_key].get('step_index', 0), session[session_key].get('chunk_index', 0)
+        else:
+             session[session_key] = {'step_index': 0, 'chunk_index': 0, 'chat_log': []}
+
+    if user_input and request_type == 'LESSON_FLOW' and user_input != 'Continue':
+        chat_log.append({"sender": "student", "type": "text", "content": user_input})
+    
+    if request_type == 'QNA':
+        chat_log.append({"sender": "student", "type": "text", "content": user_input})
+        retriever = _get_or_create_rag_retriever(lesson['id'], lesson['raw_script'])
+        response_text = answer_question_with_rag(user_input, retriever)
+        chat_log.append({"sender": "tutor", "type": "text", "content": response_text})
+        
+        if history_record_ref: history_record_ref.update({'history_json': json.dumps(chat_log)})
+        else: session[session_key]['chat_log'] = chat_log; session.modified = True
+        
+        return jsonify({'is_qna_response': True, 'tutor_text': response_text})
+
+    response_data, model_response_text = {}, ""
+    next_step_index, next_chunk_index = step_index, chunk_index
+
+    if step_index >= len(lesson_steps):
+        response_data['is_lesson_end'] = True
+        model_response_text = "Congratulations! You've completed this chapter."
+        if enrollment and enrollment['last_completed_chapter_number'] < lesson['chapter_number']:
+            enrollment_doc.reference.update({'last_completed_chapter_number': lesson['chapter_number']})
+            if lesson['chapter_number'] >= len(course['lessons']):
+                if not enrollment.get('completed_at'):
+                    enrollment_doc.reference.update({'completed_at': firestore.SERVER_TIMESTAMP})
+                response_data['certificate_url'] = url_for('certificate_view', course_id=course['id'])
+            else:
+                next_chapter = next((l for l in course['lessons'] if l['chapter_number'] == lesson['chapter_number'] + 1), None)
+                if next_chapter:
+                    response_data['next_chapter_url'] = url_for('student_chapter_view', course_id=course['id'], chapter_number=next_chapter['chapter_number'])
+    else:
+        current_step = lesson_steps[step_index]
+        step_type = current_step.get('type')
+
+        if step_type == 'CONTENT':
+            content_chunks = [chunk for chunk in current_step.get('text', '').split('\n\n') if chunk.strip()]
+            if chunk_index < len(content_chunks):
+                prompt = TUTOR_PROMPT_TEMPLATE['CONTENT'].format(content_chunks[chunk_index])
+                model_response_text = get_tutor_response(prompt)
+                chat_log.append({"sender": "tutor", "type": "text", "content": model_response_text})
+                next_chunk_index = chunk_index + 1
+            if next_chunk_index >= len(content_chunks):
+                next_step_index, next_chunk_index = step_index + 1, 0
+        else:
+            if step_type == 'MEDIA':
+                media_type = current_step.get('media_type', 'image')
+                prompt_template = TUTOR_PROMPT_TEMPLATE.get(f"MEDIA_{media_type.upper()}", TUTOR_PROMPT_TEMPLATE['MEDIA_IMAGE'])
+                model_response_text = get_tutor_response(prompt_template.format(current_step.get('alt_text', '')))
+                chat_log.append({"sender": "tutor", "type": "text", "content": model_response_text})
+                chat_log.append({"sender": "tutor", "type": media_type, "url": current_step.get('media_url'), "alt": current_step.get('alt_text')})
+                response_data.update({'media_url': current_step.get('media_url'), 'media_type': media_type})
+            elif step_type in ['QUESTION_MCQ', 'QUESTION_SA']:
+                model_response_text = get_tutor_response(TUTOR_PROMPT_TEMPLATE['QUESTION'].format(current_step.get('question', '')))
+                chat_log.append({"sender": "tutor", "type": "text", "content": model_response_text})
+                response_data['question'] = current_step
+            
+            next_step_index, next_chunk_index = step_index + 1, 0
+
+    if model_response_text: response_data['tutor_text'] = model_response_text
+
+    update_payload = {'current_step_index': next_step_index, 'current_chunk_index': next_chunk_index, 'history_json': json.dumps(chat_log)}
+    if history_record_ref:
+        if history_record_ref.get().exists: history_record_ref.update(update_payload)
+        else: history_record_ref.set({**update_payload, 'enrollment_id': enrollment_doc.id, 'lesson_id': lesson_id})
+    else:
+        session[session_key] = update_payload
+        session.modified = True
+    
+    return jsonify(response_data)
+
 @app.route('/chat/reset', methods=['POST'])
-def reset_conversation(): return jsonify({'success': True})
+@login_required
+@check_db_connection
+def reset_conversation():
+    lesson_id = request.json.get('lesson_id')
+    lesson_doc = db.collection('lessons').document(lesson_id).get()
+    if not lesson_doc.exists: abort(404)
+    lesson = _doc_to_dict(lesson_doc)
+
+    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', lesson['course_id']).limit(1).stream()
+    enrollment_list = list(enrollment_query)
+    if enrollment_list:
+        enrollment_doc = enrollment_list[0]
+        history_query = db.collection('chat_histories').where('enrollment_id', '==', enrollment_doc.id).where('lesson_id', '==', lesson_id).limit(1).stream()
+        history_list = list(history_query)
+        if history_list:
+            history_list[0].reference.update({'current_step_index': 0, 'current_chunk_index': 0, 'history_json': '[]'})
+    else: 
+        session_key = f'preview_chat_{lesson_id}'
+        if session_key in session: del session[session_key]
+    return jsonify({'success': True})
+
+
 @app.route('/chat/delete_last_turn', methods=['POST'])
-def delete_last_turn(): return jsonify({'success': False, 'message': 'Not implemented'})
+@login_required
+@check_db_connection
+def delete_last_turn():
+    lesson_id = request.json.get('lesson_id')
+    flash("This feature is complex and not yet implemented.", "info")
+    return jsonify({'success': False, 'message': 'Feature under development.'})
+
 
 if __name__ == '__main__':
     app.run(debug=True)
