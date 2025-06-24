@@ -11,7 +11,8 @@
                         <h3 class="course-title">{{ enrollment.course.title }}</h3>
                         <p class="chapter-count">
                             By {{ enrollment.course.creator.username }} | 
-                            Progress: {{ enrollment.last_completed_chapter_number }} of {{ enrollment.course.lessons|length }} Chapters
+                            {# FIX: Use the pre-calculated lesson_count #}
+                            Progress: {{ enrollment.last_completed_chapter_number }} of {{ enrollment.course.lesson_count }} Chapters
                         </p>
                     </div>
                     <div class="course-actions">
@@ -23,9 +24,5 @@
     {% else %}
         <p>Your learning shelf is empty. <a href="{{ url_for('explore') }}">Visit the Library</a> to enroll in a course.</p>
     {% endif %}
-
-   
-
-    
 
 {% endblock %}
