@@ -13,7 +13,7 @@ import requests
 
 # --- Firebase Admin SDK Initialization ---
 import firebase_admin
-from firebase_admin import credentials, firestore, auth
+from firebase_admin import credentials, firestore, auth, storage
 
 # --- Initialization ---
 load_dotenv()
@@ -37,10 +37,18 @@ try:
         decoded_creds_bytes = base64.b64decode(firebase_creds_b64)
         cred_dict = json.loads(decoded_creds_bytes.decode('utf-8'))
         cred = credentials.Certificate(cred_dict)
+        # Initialize with the storage bucket
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': f"{cred_dict.get('project_id')}.appspot.com"
+        })
     else:
+        # Fallback for local development using the JSON file
         cred = credentials.Certificate('firebase-adminsdk.json')
-    
-    firebase_admin.initialize_app(cred)
+        cred_dict = json.load(open('firebase-adminsdk.json'))
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': f"{cred_dict.get('project_id')}.appspot.com"
+        })
+
     db = firestore.client()
     print("Firebase Admin SDK initialized successfully.")
 except Exception as e:
@@ -368,24 +376,55 @@ def add_chapter_page(course_id):
 def save_chapter(course_id):
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid:
+        abort(403)
     
     script, title = request.form.get('script', ''), request.form.get('title', '')
     if not title or not script:
         flash('Both a title and script are required.', 'warning')
         return redirect(url_for('add_chapter_page', course_id=course_id))
-    
+
     parsed_data = parse_lesson_script(script)
     if not parsed_data:
         flash('The AI could not understand the lesson structure. Please check your tags and try again.', 'danger')
         return redirect(url_for('add_chapter_page', course_id=course_id))
-    
+
+    uploaded_files = request.files.getlist('media_files')
+    image_urls, audio_urls = [], []
+    bucket = storage.bucket()
+
+    for file in uploaded_files:
+        if file and file.filename != '' and allowed_file(file.filename):
+            try:
+                filename = f"course_media/{course_id}/{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
+                blob = bucket.blob(filename)
+                blob.upload_from_file(file, content_type=file.content_type)
+                blob.make_public()
+                
+                if file.content_type.startswith('image/'):
+                    image_urls.append(blob.public_url)
+                elif file.content_type.startswith('audio/'):
+                    audio_urls.append(blob.public_url)
+            except Exception as e:
+                print(f"Error uploading file {file.filename} to Firebase Storage: {e}")
+                flash(f"Error uploading {file.filename}. Please try again.", "danger")
+                return redirect(url_for('add_chapter_page', course_id=course_id))
+
+    image_iterator = iter(image_urls)
+    audio_iterator = iter(audio_urls)
+    for step in parsed_data.get('steps', []):
+        if step.get('type') == 'MEDIA':
+            if step.get('media_type') == 'image':
+                step['media_url'] = next(image_iterator, None)
+            elif step.get('media_type') == 'audio':
+                step['media_url'] = next(audio_iterator, None)
+
     last_chapter_query = db.collection('lessons').where('course_id', '==', course_id).order_by('chapter_number', direction=firestore.Query.DESCENDING).limit(1).stream()
     last_chapter_list = list(last_chapter_query)
     new_chapter_number = (last_chapter_list[0].to_dict()['chapter_number'] + 1) if last_chapter_list else 1
 
     new_lesson_data = {
-        'title': title, 'raw_script': script, 'editor_html': request.form.get('editor_html'),
+        'title': title, 'raw_script': script, 'editor_html': request.form.get('editor_html', ''),
         'parsed_json': json.dumps(parsed_data), 'course_id': course_id, 'chapter_number': new_chapter_number
     }
     db.collection('lessons').add(new_lesson_data)
@@ -394,6 +433,67 @@ def save_chapter(course_id):
     
     flash('Chapter added successfully!', 'success')
     return redirect(url_for('manage_course', course_id=course_id))
+
+
+@app.route('/chapter/<string:lesson_id>/update', methods=['POST'])
+@login_required
+@check_db_connection
+def update_chapter(lesson_id):
+    lesson_ref = db.collection('lessons').document(lesson_id)
+    lesson_doc = lesson_ref.get()
+    if not lesson_doc.exists: abort(404)
+    lesson = _doc_to_dict(lesson_doc)
+    
+    course_doc = db.collection('courses').document(lesson['course_id']).get()
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
+    
+    old_media_map = {step.get('alt_text'): step.get('media_url') for step in json.loads(lesson.get('parsed_json', '{}')).get('steps', []) if step.get('type') == 'MEDIA' and step.get('media_url')}
+    
+    script, title = request.form.get('script', ''), request.form.get('title', '')
+    
+    parsed_data = parse_lesson_script(script)
+    if not parsed_data:
+        flash('The AI could not understand the lesson structure.', 'danger')
+        return redirect(url_for('edit_chapter_page', lesson_id=lesson_id))
+
+    uploaded_files = request.files.getlist('media_files')
+    image_urls, audio_urls = [], []
+    bucket = storage.bucket()
+    for file in uploaded_files:
+        if file and file.filename != '' and allowed_file(file.filename):
+            try:
+                filename = f"course_media/{lesson['course_id']}/{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
+                blob = bucket.blob(filename)
+                blob.upload_from_file(file, content_type=file.content_type)
+                blob.make_public()
+                if file.content_type.startswith('image/'): image_urls.append(blob.public_url)
+                elif file.content_type.startswith('audio/'): audio_urls.append(blob.public_url)
+            except Exception as e:
+                print(f"Error uploading file {file.filename} to Firebase Storage: {e}")
+                flash(f"Error uploading {file.filename}. Please try again.", "danger")
+                return redirect(url_for('edit_chapter_page', lesson_id=lesson_id))
+
+    image_iterator = iter(image_urls)
+    audio_iterator = iter(audio_urls)
+    for step in parsed_data.get('steps', []):
+        if step.get('type') == 'MEDIA':
+            alt_text = step.get('alt_text')
+            assigned_url = old_media_map.get(alt_text) 
+            
+            if step.get('media_type') == 'image':
+                assigned_url = next(image_iterator, assigned_url)
+            elif step.get('media_type') == 'audio':
+                assigned_url = next(audio_iterator, assigned_url)
+            
+            step['media_url'] = assigned_url
+
+    lesson_ref.update({
+        'title': title, 'raw_script': script, 'editor_html': request.form.get('editor_html', ''),
+        'parsed_json': json.dumps(parsed_data)
+    })
+    
+    flash('Chapter updated successfully!', 'success')
+    return redirect(url_for('manage_course', course_id=lesson['course_id']))
 
 @app.route('/chapter/<string:lesson_id>/delete', methods=['POST'])
 @login_required
@@ -543,7 +643,6 @@ def course_player(course_id):
 
     return redirect(url_for('student_chapter_view', course_id=course_id, chapter_number=target_lesson['chapter_number']))
 
-
 @app.route('/course/<string:course_id>/<int:chapter_number>')
 @login_required
 @check_db_connection
@@ -609,46 +708,27 @@ def update_course_details(course_id):
     if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
     
     update_data = {'description': request.form.get('description')}
-    
-    # Check if a thumbnail file was uploaded
     if 'thumbnail' in request.files:
         file = request.files['thumbnail']
         if file and file.filename != '':
             try:
-                # Get your storage bucket
-                # The bucket name is usually your project ID + ".appspot.com"
-                # e.g., "claenh-db.appspot.com"
-                bucket_name = "claenh-db.appspot.com" # As per your FYI
-                
-                # FIX: Use the correctly imported `storage` module from firebase_admin
-                bucket = firebase_admin.storage.bucket(name=bucket_name)
-                
-                # Create a unique filename for the blob
+                bucket = storage.bucket()
                 filename = f"course_thumbnails/{course_id}/{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
-                
-                # Create a blob object
                 blob = bucket.blob(filename)
-                
-                # Upload the file from the user's request, specifying the content type
-                blob.upload_from_file(
-                    file,
-                    content_type=file.content_type
-                )
-                
-                # Make the blob publicly viewable
+                blob.upload_from_file(file, content_type=file.content_type)
                 blob.make_public()
-                
-                # Get the public URL and save it to Firestore
                 update_data['thumbnail_url'] = blob.public_url
-
             except Exception as e:
                 print(f"Error uploading to Firebase Storage: {e}")
                 flash("There was an error uploading the thumbnail. Please try again.", "danger")
                 return redirect(url_for('manage_course', course_id=course_id))
 
     if update_data:
-        course_ref.update(update_data)
-        flash('Course details updated successfully!', 'success')
+        if ('description' in update_data and update_data['description'] != course_doc.to_dict().get('description')) or 'thumbnail_url' in update_data:
+             course_ref.update(update_data)
+             flash('Course details updated successfully!', 'success')
+        else:
+             flash('No changes were detected.', 'info')
         
     return redirect(url_for('manage_course', course_id=course_id))
 
@@ -664,31 +744,6 @@ def edit_chapter_page(lesson_id):
     lesson['course'] = _doc_to_dict(course_doc)
     return render_template('edit_chapter.html', lesson=lesson)
 
-@app.route('/chapter/<string:lesson_id>/update', methods=['POST'])
-@login_required
-@check_db_connection
-def update_chapter(lesson_id):
-    lesson_ref = db.collection('lessons').document(lesson_id)
-    lesson_doc = lesson_ref.get()
-    if not lesson_doc.exists: abort(404)
-    lesson = _doc_to_dict(lesson_doc)
-    
-    course_doc = db.collection('courses').document(lesson['course_id']).get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
-    
-    parsed_data = parse_lesson_script(request.form['script'])
-    if not parsed_data:
-        flash('The AI could not understand the lesson structure.', 'danger')
-        return redirect(url_for('edit_chapter_page', lesson_id=lesson_id))
-
-    lesson_ref.update({
-        'title': request.form['title'], 'raw_script': request.form['script'], 'editor_html': request.form.get('editor_html'),
-        'parsed_json': json.dumps(parsed_data)
-    })
-    
-    flash('Chapter updated successfully!', 'success')
-    return redirect(url_for('manage_course', course_id=lesson['course_id']))
-
 @app.route('/course/<string:course_id>/submit_for_review', methods=['POST'])
 @login_required
 @check_db_connection
@@ -700,13 +755,14 @@ def submit_for_review(course_id):
         flash('Course submitted for review!', 'success')
     return redirect(url_for('manage_course', course_id=course_id))
 
+
 @app.route('/course/<string:course_id>/unpublish', methods=['POST'])
 @login_required
 @check_db_connection
 def unpublish_course(course_id):
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
-    if course_doc.exists and (course_doc.to_dict().get('user_id') == current_user.uid or current_user.is_admin):
+    if course_doc.exists and (course_doc.to_dict().get('user_id') == current_user.uid or (current_user.is_authenticated and current_user.is_admin)):
         course_ref.update({'status': 'draft'})
         flash('Course returned to draft status.', 'info')
     return redirect(url_for('manage_course', course_id=course_id))
@@ -794,7 +850,6 @@ def classify_intent():
         print(f"Error classifying intent: {e}")
         return jsonify({"intent": "QNA", "query": user_input})
 
-
 @app.route('/chat', methods=['POST'])
 @login_required
 @check_db_connection
@@ -804,7 +859,6 @@ def chat():
     user_input = data.get('user_input')
     request_type = data.get('request_type', 'LESSON_FLOW')
 
-    # --- Data Loading ---
     lesson_doc = db.collection('lessons').document(lesson_id).get()
     if not lesson_doc.exists: abort(404)
     lesson = _doc_to_dict(lesson_doc)
@@ -817,22 +871,18 @@ def chat():
 
     lesson_steps = json.loads(lesson.get('parsed_json', '{}')).get('steps', [])
 
-    # --- Intent Handling ---
     if request_type == 'MEDIA_REQUEST':
         requested_alt_text = user_input
         media_to_show = next((step for step in lesson_steps if step.get('type') == 'MEDIA' and step.get('alt_text') == requested_alt_text), None)
         if media_to_show:
             return jsonify({
                 "tutor_text": f"Of course, here is '{media_to_show.get('alt_text')}' again.",
-                "media_url": media_to_show.get('media_url'), 
-                "media_type": media_to_show.get('media_type'),
-                "alt_text": media_to_show.get('alt_text'),
-                "is_qna_response": True
+                "media_url": media_to_show.get('media_url'), "media_type": media_to_show.get('media_type'),
+                "alt_text": media_to_show.get('alt_text'), "is_qna_response": True
             })
         else:
             request_type = 'QNA'
 
-    # --- Authorization and State Loading ---
     enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.uid).where('course_id', '==', course['id']).limit(1).stream()
     enrollment_list = list(enrollment_query)
     enrollment_doc = enrollment_list[0] if enrollment_list else None
@@ -855,25 +905,22 @@ def chat():
             chat_log = json.loads(history_record.get('history_json', '[]'))
         else:
             history_record_ref = db.collection('chat_histories').document()
-    else: # Preview mode
+    else: 
         if session_key in session and user_input is not None:
              state = session[session_key]
              chat_log, current_step_index, current_chunk_index = state.get('chat_log', []), state.get('step_index', 0), state.get('chunk_index', 0)
         else:
              session[session_key] = {'step_index': 0, 'chunk_index': 0, 'chat_log': []}
 
-    # --- Log User Input ---
     if user_input and request_type == 'LESSON_FLOW' and user_input != 'Continue':
         chat_log.append({"sender": "student", "type": "text", "content": user_input})
     
-    # --- Q&A Path ---
     if request_type == 'QNA':
         chat_log.append({"sender": "student", "type": "text", "content": user_input})
         retriever = _get_or_create_rag_retriever(lesson['id'], lesson['raw_script'])
         response_text = answer_question_with_rag(user_input, retriever)
         chat_log.append({"sender": "tutor", "type": "text", "content": response_text})
         
-        # Save Q&A state
         update_payload = {'history_json': json.dumps(chat_log)}
         if history_record_ref:
             if history_record_ref.get().exists:
@@ -883,10 +930,8 @@ def chat():
         else:
             session[session_key]['chat_log'] = chat_log
             session.modified = True
-        
         return jsonify({'is_qna_response': True, 'tutor_text': response_text})
 
-    # --- Pessimistic State Update Logic ---
     next_step_index, next_chunk_index = current_step_index, current_chunk_index
     if current_step_index < len(lesson_steps):
         step_type = lesson_steps[current_step_index].get('type')
@@ -897,11 +942,10 @@ def chat():
             else:
                 next_step_index = current_step_index + 1
                 next_chunk_index = 0
-        else: # MEDIA, QUESTION
+        else:
             next_step_index = current_step_index + 1
             next_chunk_index = 0
     
-    # Immediately SAVE the next state
     state_update_payload = {'current_step_index': next_step_index, 'current_chunk_index': next_chunk_index}
     if history_record_ref:
         if history_record_ref.get().exists:
@@ -913,7 +957,6 @@ def chat():
         session[session_key]['chunk_index'] = next_chunk_index
         session.modified = True
 
-    # --- Step Execution Logic ---
     response_data, model_response_text = {}, ""
     if current_step_index >= len(lesson_steps):
         response_data['is_lesson_end'] = True
@@ -943,26 +986,18 @@ def chat():
             
             prompt_template_key = f"MEDIA_{media_type.upper()}"
             prompt_template = TUTOR_PROMPT_TEMPLATE.get(prompt_template_key, TUTOR_PROMPT_TEMPLATE['MEDIA_IMAGE'])
-            
             model_response_text = get_tutor_response(prompt_template.format(alt_text))
             
             response_data.update({
                 'media_url': current_step_to_process.get('media_url'), 
-                'media_type': media_type,
-                'alt_text': alt_text
+                'media_type': media_type, 'alt_text': alt_text
             })
-            chat_log.append({
-                "sender": "tutor", 
-                "type": media_type, 
-                "url": current_step_to_process.get('media_url'), 
-                "alt": alt_text
-            })
+            chat_log.append({"sender": "tutor", "type": media_type, "url": current_step_to_process.get('media_url'), "alt": alt_text})
 
         elif step_type in ['QUESTION_MCQ', 'QUESTION_SA']:
             model_response_text = get_tutor_response(TUTOR_PROMPT_TEMPLATE['QUESTION'].format(current_step_to_process.get('question', '')))
             response_data['question'] = current_step_to_process
 
-    # --- Finalize and save chat log ---
     if model_response_text:
         response_data['tutor_text'] = model_response_text
         chat_log.append({"sender": "tutor", "type": "text", "content": model_response_text})
@@ -998,7 +1033,6 @@ def reset_conversation():
         if session_key in session: del session[session_key]
     return jsonify({'success': True})
 
-
 @app.route('/chat/delete_last_turn', methods=['POST'])
 @login_required
 @check_db_connection
@@ -1006,7 +1040,6 @@ def delete_last_turn():
     lesson_id = request.json.get('lesson_id')
     flash("This feature is complex and not yet implemented.", "info")
     return jsonify({'success': False, 'message': 'Feature under development.'})
-
 
 if __name__ == '__main__':
     app.run(debug=True)
