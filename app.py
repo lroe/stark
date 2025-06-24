@@ -618,7 +618,10 @@ def update_course_details(course_id):
                 # Get your storage bucket
                 # The bucket name is usually your project ID + ".appspot.com"
                 # e.g., "claenh-db.appspot.com"
-                bucket = storage.bucket() 
+                bucket_name = "claenh-db.appspot.com" # As per your FYI
+                
+                # FIX: Use the correctly imported `storage` module from firebase_admin
+                bucket = firebase_admin.storage.bucket(name=bucket_name)
                 
                 # Create a unique filename for the blob
                 filename = f"course_thumbnails/{course_id}/{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
