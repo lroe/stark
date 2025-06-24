@@ -28,26 +28,21 @@ login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
 # --- Firebase Initialization ---
-db = None # Initialize db as None
+db = None
 FIREBASE_WEB_API_KEY = os.getenv("FIREBASE_WEB_API_KEY")
 
 try:
-    # Check for the Vercel environment variable FIRST
     firebase_creds_b64 = os.getenv('FIREBASE_ADMIN_SDK_BASE64')
     if firebase_creds_b64:
-        print("Found FIREBASE_ADMIN_SDK_BASE64 env var. Decoding...")
         decoded_creds_bytes = base64.b64decode(firebase_creds_b64)
         cred_dict = json.loads(decoded_creds_bytes.decode('utf-8'))
         cred = credentials.Certificate(cred_dict)
-        print("Successfully parsed decoded credentials.")
     else:
-        # Fallback for local development using the JSON file
-        print("Using local firebase-adminsdk.json file.")
         cred = credentials.Certificate('firebase-adminsdk.json')
     
     firebase_admin.initialize_app(cred)
+    db = firestore.client()
     print("Firebase Admin SDK initialized successfully.")
-    db = firestore.client() # Assign db client here
 except Exception as e:
     print(f"FATAL ERROR: Could not initialize Firebase Admin SDK: {e}")
 
@@ -217,7 +212,7 @@ def course_detail_page(course_id):
     
     share_id = request.args.get('share_id')
     is_authorized = course['status'] == 'published' or \
-                    (current_user.is_authenticated and (current_user.id == course['user_id'] or current_user.is_admin)) or \
+                    (current_user.is_authenticated and (current_user.uid == course['user_id'] or current_user.is_admin)) or \
                     (course.get('shareable_link_id') and course['shareable_link_id'] == share_id)
     if not is_authorized: abort(404)
     
@@ -228,7 +223,6 @@ def course_detail_page(course_id):
     course['lessons'] = [_doc_to_dict(l) for l in lessons_query]
     
     return render_template('course_detail.html', course=course, share_id=share_id)
-
 
 # --- Authentication Routes ---
 @app.route('/register', methods=['GET', 'POST'])
@@ -303,7 +297,7 @@ def logout():
 @login_required
 @check_db_connection
 def dashboard():
-    enrollments_query = db.collection('enrollments').where('user_id', '==', current_user.id).stream()
+    enrollments_query = db.collection('enrollments').where('user_id', '==', current_user.uid).stream()
     enrollments = [_doc_to_dict(e) for e in enrollments_query]
 
     course_ids = [e['course_id'] for e in enrollments if 'course_id' in e]
@@ -326,7 +320,7 @@ def dashboard():
 @login_required
 @check_db_connection
 def creator_dashboard():
-    courses_query = db.collection('courses').where('user_id', '==', current_user.id).stream()
+    courses_query = db.collection('courses').where('user_id', '==', current_user.uid).stream()
     created_courses = [_doc_to_dict(c) for c in courses_query]
     return render_template('creator_dashboard.html', created_courses=created_courses)
 
@@ -340,7 +334,7 @@ def create_course():
         return redirect(url_for('creator_dashboard'))
     
     new_course_data = {
-        'title': title, 'user_id': current_user.id, 'status': 'draft', 'is_published': False,
+        'title': title, 'user_id': current_user.uid, 'status': 'draft', 'is_published': False,
         'description': '', 'thumbnail_url': None, 'shareable_link_id': None, 
         'created_at': firestore.SERVER_TIMESTAMP,
         'lesson_count': 0, 'review_count': 0, 'total_rating_sum': 0, 'average_rating': 0.0
@@ -354,7 +348,7 @@ def create_course():
 @check_db_connection
 def manage_course(course_id):
     course_doc = db.collection('courses').document(course_id).get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
     course = _doc_to_dict(course_doc)
     lessons_query = db.collection('lessons').where('course_id', '==', course_id).order_by('chapter_number').stream()
     course['lessons'] = [_doc_to_dict(l) for l in lessons_query]
@@ -365,7 +359,7 @@ def manage_course(course_id):
 @check_db_connection
 def add_chapter_page(course_id):
     course_doc = db.collection('courses').document(course_id).get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
     return render_template('create_chapter.html', course=_doc_to_dict(course_doc))
 
 @app.route('/course/<string:course_id>/save_chapter', methods=['POST'])
@@ -374,7 +368,7 @@ def add_chapter_page(course_id):
 def save_chapter(course_id):
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
     
     script, title = request.form.get('script', ''), request.form.get('title', '')
     if not title or not script:
@@ -412,7 +406,7 @@ def delete_chapter(lesson_id):
     course_id = lesson['course_id']
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
 
     @firestore.transactional
     def delete_and_reorder_transaction(transaction):
@@ -443,14 +437,14 @@ def enroll_in_course(course_id):
     if not course_doc.exists: abort(404)
     course = _doc_to_dict(course_doc)
 
-    if current_user.id == course['user_id']:
+    if current_user.uid == course['user_id']:
         flash("You cannot enroll in a course you've created.", "warning")
         return redirect(url_for('course_detail_page', course_id=course_id))
     if current_user.is_enrolled(course):
         flash("You are already enrolled in this course.", "info")
         return redirect(url_for('course_player', course_id=course_id))
         
-    new_enrollment = {'user_id': current_user.id, 'course_id': course_id, 'last_completed_chapter_number': 0, 'completed_at': None}
+    new_enrollment = {'user_id': current_user.uid, 'course_id': course_id, 'last_completed_chapter_number': 0, 'completed_at': None}
     db.collection('enrollments').add(new_enrollment)
     
     flash(f"You have successfully enrolled in '{course['title']}'!", 'success')
@@ -471,7 +465,7 @@ def submit_review(course_id):
     new_review_ref = db.collection('reviews').document()
     new_review_data = {
         'rating': rating, 'comment': comment, 'course_id': course_id, 
-        'user_id': current_user.id, 'created_at': firestore.SERVER_TIMESTAMP
+        'user_id': current_user.uid, 'created_at': firestore.SERVER_TIMESTAMP
     }
 
     @firestore.transactional
@@ -524,7 +518,7 @@ def reviews_page(course_id):
 @login_required
 @check_db_connection
 def course_player(course_id):
-    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', course_id).limit(1).stream()
+    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.uid).where('course_id', '==', course_id).limit(1).stream()
     enrollment_list = list(enrollment_query)
     enrollment = _doc_to_dict(enrollment_list[0]) if enrollment_list else None
 
@@ -533,8 +527,9 @@ def course_player(course_id):
     lessons_query = db.collection('lessons').where('course_id', '==', course_id).order_by('chapter_number').limit(int(chapter_to_start)).stream()
     lessons = [_doc_to_dict(l) for l in lessons_query]
     
+    course_doc = db.collection('courses').document(course_id).get()
     if not lessons:
-        if current_user.is_authenticated and current_user.id == db.collection('courses').document(course_id).get().get('user_id'):
+        if current_user.is_authenticated and current_user.uid == course_doc.to_dict().get('user_id'):
             flash('This course has no chapters yet. Add one to enable the preview.', 'info')
             return redirect(url_for('manage_course', course_id=course_id))
         flash("This course has no content yet.", "warning")
@@ -562,11 +557,11 @@ def student_chapter_view(course_id, chapter_number):
     if not lesson_list: abort(404)
     lesson = _doc_to_dict(lesson_list[0])
     
-    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', course_id).limit(1).stream()
+    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.uid).where('course_id', '==', course_id).limit(1).stream()
     enrollment_list = list(enrollment_query)
     enrollment = _doc_to_dict(enrollment_list[0]) if enrollment_list else None
     
-    is_authorized = course['status'] == 'published' or (current_user.is_authenticated and (current_user.id == course['user_id'] or enrollment or current_user.is_admin))
+    is_authorized = course['status'] == 'published' or (current_user.is_authenticated and (current_user.uid == course['user_id'] or enrollment or current_user.is_admin))
     if not is_authorized: abort(404)
 
     all_lessons_query = db.collection('lessons').where('course_id', '==', course_id).order_by('chapter_number').stream()
@@ -587,7 +582,7 @@ def student_chapter_view(course_id, chapter_number):
 @login_required
 @check_db_connection
 def certificate_view(course_id):
-    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', course_id).limit(1).stream()
+    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.uid).where('course_id', '==', course_id).limit(1).stream()
     enrollment_list = list(enrollment_query)
     if not enrollment_list: abort(404)
     enrollment = _doc_to_dict(enrollment_list[0])
@@ -599,7 +594,7 @@ def certificate_view(course_id):
     enrollment['user'] = _doc_to_dict(db.collection('users').document(enrollment['user_id']).get())
     enrollment['course'] = _doc_to_dict(db.collection('courses').document(enrollment['course_id']).get())
 
-    review_query = db.collection('reviews').where('user_id', '==', current_user.id).where('course_id', '==', course_id).limit(1).stream()
+    review_query = db.collection('reviews').where('user_id', '==', current_user.uid).where('course_id', '==', course_id).limit(1).stream()
     review_list = list(review_query)
     existing_review = _doc_to_dict(review_list[0]) if review_list else None
 
@@ -611,7 +606,7 @@ def certificate_view(course_id):
 def update_course_details(course_id):
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
     
     update_data = {'description': request.form.get('description')}
     if 'thumbnail' in request.files:
@@ -636,7 +631,7 @@ def edit_chapter_page(lesson_id):
     if not lesson_doc.exists: abort(404)
     lesson = _doc_to_dict(lesson_doc)
     course_doc = db.collection('courses').document(lesson['course_id']).get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
     lesson['course'] = _doc_to_dict(course_doc)
     return render_template('edit_chapter.html', lesson=lesson)
 
@@ -650,7 +645,7 @@ def update_chapter(lesson_id):
     lesson = _doc_to_dict(lesson_doc)
     
     course_doc = db.collection('courses').document(lesson['course_id']).get()
-    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.id: abort(403)
+    if not course_doc.exists or course_doc.to_dict().get('user_id') != current_user.uid: abort(403)
     
     parsed_data = parse_lesson_script(request.form['script'])
     if not parsed_data:
@@ -671,7 +666,7 @@ def update_chapter(lesson_id):
 def submit_for_review(course_id):
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
-    if course_doc.exists and course_doc.to_dict().get('user_id') == current_user.id:
+    if course_doc.exists and course_doc.to_dict().get('user_id') == current_user.uid:
         course_ref.update({'status': 'pending_review'})
         flash('Course submitted for review!', 'success')
     return redirect(url_for('manage_course', course_id=course_id))
@@ -682,7 +677,7 @@ def submit_for_review(course_id):
 def unpublish_course(course_id):
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
-    if course_doc.exists and (course_doc.to_dict().get('user_id') == current_user.id or current_user.is_admin):
+    if course_doc.exists and (course_doc.to_dict().get('user_id') == current_user.uid or current_user.is_admin):
         course_ref.update({'status': 'draft'})
         flash('Course returned to draft status.', 'info')
     return redirect(url_for('manage_course', course_id=course_id))
@@ -729,7 +724,7 @@ def decide_course(course_id):
 def generate_share_link(course_id):
     course_ref = db.collection('courses').document(course_id)
     course_doc = course_ref.get()
-    if course_doc.exists and course_doc.to_dict().get('user_id') == current_user.id:
+    if course_doc.exists and course_doc.to_dict().get('user_id') == current_user.uid:
         if not course_doc.to_dict().get('shareable_link_id'):
             course_ref.update({'shareable_link_id': str(uuid.uuid4())})
     return redirect(url_for('manage_course', course_id=course_id))
@@ -804,12 +799,12 @@ def chat():
         else:
             request_type = 'QNA'
 
-    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', course['id']).limit(1).stream()
+    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.uid).where('course_id', '==', course['id']).limit(1).stream()
     enrollment_list = list(enrollment_query)
     enrollment_doc = enrollment_list[0] if enrollment_list else None
     enrollment = _doc_to_dict(enrollment_doc) if enrollment_doc else None
     
-    is_creator = (current_user.id == course['user_id'])
+    is_creator = (current_user.uid == course['user_id'])
     if not enrollment and not is_creator and not current_user.is_admin: abort(403)
 
     history_record_ref, step_index, chunk_index, chat_log = None, 0, 0, []
@@ -826,7 +821,7 @@ def chat():
             chat_log = json.loads(history_record.get('history_json', '[]'))
         else:
             history_record_ref = db.collection('chat_histories').document()
-    else: # Preview mode
+    else:
         if session_key in session and user_input is not None:
              chat_log, step_index, chunk_index = session[session_key].get('chat_log', []), session[session_key].get('step_index', 0), session[session_key].get('chunk_index', 0)
         else:
@@ -841,7 +836,9 @@ def chat():
         response_text = answer_question_with_rag(user_input, retriever)
         chat_log.append({"sender": "tutor", "type": "text", "content": response_text})
         
-        if history_record_ref: history_record_ref.update({'history_json': json.dumps(chat_log)})
+        if history_record_ref: 
+            if history_record_ref.get().exists: history_record_ref.update({'history_json': json.dumps(chat_log)})
+            else: history_record_ref.set({'enrollment_id': enrollment_doc.id, 'lesson_id': lesson_id, 'history_json': json.dumps(chat_log), 'current_step_index': 0, 'current_chunk_index': 0})
         else: session[session_key]['chat_log'] = chat_log; session.modified = True
         
         return jsonify({'is_qna_response': True, 'tutor_text': response_text})
@@ -911,7 +908,7 @@ def reset_conversation():
     if not lesson_doc.exists: abort(404)
     lesson = _doc_to_dict(lesson_doc)
 
-    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.id).where('course_id', '==', lesson['course_id']).limit(1).stream()
+    enrollment_query = db.collection('enrollments').where('user_id', '==', current_user.uid).where('course_id', '==', lesson['course_id']).limit(1).stream()
     enrollment_list = list(enrollment_query)
     if enrollment_list:
         enrollment_doc = enrollment_list[0]
